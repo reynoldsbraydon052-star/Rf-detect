@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Ring -->
+    <path
+        android:pathData="M54,20 A34,34 0 1,1 53.9,20 Z"
+        android:strokeWidth="3"
+        android:strokeColor="#00FF66"
+        android:fillColor="#00000000" />
+    <!-- Inner Ring -->
+    <path
+        android:pathData="M54,34 A20,20 0 1,1 53.9,34 Z"
+        android:strokeWidth="2"
+        android:strokeColor="#00FF66"
+        android:fillColor="#00000000" />
+    <!-- Crosshairs -->
+    <path
+        android:pathData="M54,16 L54,92 M16,54 L92,54"
+        android:strokeWidth="2"
+        android:strokeColor="#00FF66" />
+    <!-- Blip target -->
+    <path
+        android:pathData="M66,42 A4,4 0 1,1 65.9,42 Z"
+        android:fillColor="#00E5FF" />
+</vector>

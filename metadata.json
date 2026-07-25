@@ -1,0 +1,6 @@
+{
+  "name": "RF Spectrum Radar",
+  "description": "100% offline RF spectrum detection, Bluetooth LE sounder, Wi-Fi analyzer, and micro-perimeter device tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
