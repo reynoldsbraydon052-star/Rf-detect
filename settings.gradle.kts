@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "RF Spectrum Radar"
+rootProject.name = "sense"
 
 include(":app")

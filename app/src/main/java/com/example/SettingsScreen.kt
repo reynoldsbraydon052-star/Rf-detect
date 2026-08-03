@@ -95,7 +95,7 @@ fun SettingsScreen(
                             color = Color(0xFF00FF66)
                         )
                         Text(
-                            text = "sensed SIGINT & Hardware Diagnostic Parameters",
+                            text = "sense SIGINT & Hardware Diagnostic Parameters",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp
