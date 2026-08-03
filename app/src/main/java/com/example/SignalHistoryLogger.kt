@@ -73,6 +73,25 @@ class SignalHistoryLogger(private val context: Context) {
         }
     }
 
+    fun getStructuredHistory(limit: Int = 100): List<SignalHistoryItem> {
+        val lines = getAllLogLines()
+        if (lines.size <= 1) return emptyList()
+
+        return lines.drop(1).takeLast(limit).mapNotNull { line ->
+            val parts = line.split(",")
+            if (parts.size >= 6) {
+                SignalHistoryItem(
+                    timestamp = parts[0],
+                    deviceName = parts[1],
+                    distanceMeters = parts[2].toFloatOrNull() ?: 1.0f,
+                    type = parts[3],
+                    frequencyMhz = parts[4].toDoubleOrNull() ?: 2412.0,
+                    isBreach = parts[5].toBooleanStrictOrNull() ?: false
+                )
+            } else null
+        }.reversed()
+    }
+
     fun clearLog() {
         try {
             if (logFile.exists()) {
@@ -86,3 +105,12 @@ class SignalHistoryLogger(private val context: Context) {
 
     fun getCsvFile(): File = logFile
 }
+
+data class SignalHistoryItem(
+    val timestamp: String,
+    val deviceName: String,
+    val distanceMeters: Float,
+    val type: String,
+    val frequencyMhz: Double,
+    val isBreach: Boolean
+)

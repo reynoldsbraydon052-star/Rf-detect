@@ -11,12 +11,86 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+enum class ScanMode(
+    val title: String,
+    val subtitle: String,
+    val delayMs: Long
+) {
+    TACTICAL_FULL(
+        title = "Full Tactical Array",
+        subtitle = "Active multi-band sweep across Wi-Fi, BLE, Cell, GNSS, Audio & EMF.",
+        delayMs = 1200L
+    ),
+    STEALTH_PASSIVE(
+        title = "Stealth Silent Radar",
+        subtitle = "Low-profile passive monitoring with audio sonar muted.",
+        delayMs = 1500L
+    ),
+    HIGH_SENSITIVITY(
+        title = "High-Sensitivity RF",
+        subtitle = "Rapid sampling with fine-grained RSSI signal analysis.",
+        delayMs = 600L
+    ),
+    POWER_SAVER(
+        title = "Eco Power Saver",
+        subtitle = "Optimized antenna polling frequency to conserve battery.",
+        delayMs = 2500L
+    )
+}
+
+enum class PerimeterSensitivityPreset(
+    val title: String,
+    val description: String,
+    val breachMeters: Float,
+    val warningMeters: Float,
+    val pulseMs: Long
+) {
+    ULTRA_SENSITIVE(
+        title = "Ultra Micro-Perimeter",
+        description = "Immediate 1.5m breach trigger with 4.0m warning halo. High-frequency rapid haptic pings.",
+        breachMeters = 1.5f,
+        warningMeters = 4.0f,
+        pulseMs = 250L
+    ),
+    TACTICAL_GUARD(
+        title = "Tactical Close Guard",
+        description = "Balanced 3.0m breach zone with 8.0m warning zone. Standard tactical alert cadence.",
+        breachMeters = 3.0f,
+        warningMeters = 8.0f,
+        pulseMs = 500L
+    ),
+    SECURITY_PERIMETER(
+        title = "Security Perimeter",
+        description = "Standard 5.0m breach threshold with 12.0m outer warning perimeter.",
+        breachMeters = 5.0f,
+        warningMeters = 12.0f,
+        pulseMs = 750L
+    ),
+    LONG_RANGE_OUTPOST(
+        title = "Long Range Outpost",
+        description = "Extended 10.0m breach cutoff with 25.0m outer detection radius.",
+        breachMeters = 10.0f,
+        warningMeters = 25.0f,
+        pulseMs = 1000L
+    ),
+    CUSTOM(
+        title = "User Defined Custom",
+        description = "Fine-tuned custom distance thresholds with manual +/- micro adjustments.",
+        breachMeters = 5.0f,
+        warningMeters = 10.0f,
+        pulseMs = 500L
+    )
+}
+
 enum class RadarTab {
     SWEEP_RADAR,
     SPECTRUM_ANALYZER,
+    DETECTED_SENSORS,
+    HISTORIC_HEATMAP,
     MAGNETOMETER_EMF,
     SECURITY_GUARD,
-    CSV_LOG_CONSOLE
+    CSV_LOG_CONSOLE,
+    SETTINGS
 }
 
 data class SignalRadarUiState(
@@ -25,11 +99,15 @@ data class SignalRadarUiState(
     val activeBlips: List<RadarBlip> = emptyList(),
     val nearestBlip: RadarBlip? = null,
     val perimeterThresholdMeters: Float = 5.0f,
+    val warningZoneThresholdMeters: Float = 10.0f,
+    val perimeterSensitivityPreset: PerimeterSensitivityPreset = PerimeterSensitivityPreset.TACTICAL_GUARD,
+    val hapticPulseFrequencyMs: Long = 500L,
     val perimeterBreachCount: Int = 0,
     val isAudioSonarActive: Boolean = false,
     val isPerimeterAlarmEnabled: Boolean = true,
     val isScanningActive: Boolean = true,
     val logConsoleTail: String = "",
+    val structuredHistory: List<SignalHistoryItem> = emptyList(),
     val activeAntennaCount: Int = 6, // Wi-Fi, BLE, Cell, GNSS, UWB, NFC
     val selectedFilterType: String = "ALL", // "ALL", "WIFI", "CELLULAR", "BLE", "MAGNETIC", "AUDIO"
     val magnetometerData: MagnetometerData = MagnetometerData(),
@@ -37,7 +115,14 @@ data class SignalRadarUiState(
     val calibrationNotificationMessage: String? = null,
     val antennaArrayTelemetry: List<AntennaTelemetry> = emptyList(),
     val savedBleDevices: List<BleDeviceEntity> = emptyList(),
-    val isBleScannerServiceActive: Boolean = true
+    val isBleScannerServiceActive: Boolean = true,
+    // Settings & Alert Thresholds State:
+    val scanMode: ScanMode = ScanMode.TACTICAL_FULL,
+    val rssiAlertThresholdDbm: Int = -75, // Alert cutoff threshold (-95 to -40 dBm)
+    val isRssiAlertEnabled: Boolean = true,
+    val emfAlertThresholdMicroTesla: Float = 50.0f, // 10 to 200 µT
+    val acousticAlertThresholdDb: Int = -50, // -80 to -10 dB
+    val stealthModeEnabled: Boolean = false
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -148,15 +233,16 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 val telemetry = hardwareSpectrumManager.getAntennaArrayTelemetry()
                 _uiState.update { it.copy(antennaArrayTelemetry = telemetry) }
-                delay(1200)
+                delay(_uiState.value.scanMode.delayMs)
             }
         }
 
-        // Periodically refresh log console tail
+        // Periodically refresh log console tail & structured history
         viewModelScope.launch {
             while (isActive) {
                 val tail = historyLogger.readLogTail(15)
-                _uiState.update { it.copy(logConsoleTail = tail) }
+                val historyList = historyLogger.getStructuredHistory(100)
+                _uiState.update { it.copy(logConsoleTail = tail, structuredHistory = historyList) }
                 delay(2000)
             }
         }
@@ -223,7 +309,10 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val threshold = _uiState.value.perimeterThresholdMeters
         val isBreach = smoothedDistance < threshold
 
-        if (isBreach && _uiState.value.isPerimeterAlarmEnabled) {
+        val rssiThreshold = _uiState.value.rssiAlertThresholdDbm
+        val isRssiAlert = smoothedRssi >= rssiThreshold && _uiState.value.isRssiAlertEnabled
+
+        if ((isBreach || isRssiAlert) && _uiState.value.isPerimeterAlarmEnabled && !_uiState.value.stealthModeEnabled) {
             alarmEngine.triggerProximityAlert()
         }
 
@@ -264,7 +353,52 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun setPerimeterThreshold(meters: Float) {
-        _uiState.update { it.copy(perimeterThresholdMeters = meters) }
+        val clampedBreach = meters.coerceIn(0.5f, 30.0f)
+        _uiState.update { state ->
+            val clampedWarning = maxOf(state.warningZoneThresholdMeters, clampedBreach + 0.5f)
+            state.copy(
+                perimeterThresholdMeters = clampedBreach,
+                warningZoneThresholdMeters = clampedWarning,
+                perimeterSensitivityPreset = PerimeterSensitivityPreset.CUSTOM
+            )
+        }
+    }
+
+    fun setWarningZoneThreshold(meters: Float) {
+        _uiState.update { state ->
+            val clampedWarning = meters.coerceIn(state.perimeterThresholdMeters + 0.5f, 60.0f)
+            state.copy(
+                warningZoneThresholdMeters = clampedWarning,
+                perimeterSensitivityPreset = PerimeterSensitivityPreset.CUSTOM
+            )
+        }
+    }
+
+    fun setPerimeterSensitivityPreset(preset: PerimeterSensitivityPreset) {
+        _uiState.update { state ->
+            if (preset == PerimeterSensitivityPreset.CUSTOM) {
+                state.copy(perimeterSensitivityPreset = preset)
+            } else {
+                state.copy(
+                    perimeterSensitivityPreset = preset,
+                    perimeterThresholdMeters = preset.breachMeters,
+                    warningZoneThresholdMeters = preset.warningMeters,
+                    hapticPulseFrequencyMs = preset.pulseMs
+                )
+            }
+        }
+    }
+
+    fun setHapticPulseFrequency(pulseMs: Long) {
+        _uiState.update { it.copy(hapticPulseFrequencyMs = pulseMs) }
+    }
+
+    fun adjustPerimeterThreshold(deltaMeters: Float) {
+        setPerimeterThreshold(_uiState.value.perimeterThresholdMeters + deltaMeters)
+    }
+
+    fun adjustWarningZoneThreshold(deltaMeters: Float) {
+        setWarningZoneThreshold(_uiState.value.warningZoneThresholdMeters + deltaMeters)
     }
 
     fun toggleAudioSonar() {
@@ -328,6 +462,65 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     fun deleteBleDeviceFromDb(macAddress: String) {
         viewModelScope.launch {
             bleRepository.deleteDevice(macAddress)
+        }
+    }
+
+    fun setScanMode(mode: ScanMode) {
+        _uiState.update { state ->
+            val isStealth = mode == ScanMode.STEALTH_PASSIVE
+            if (isStealth) {
+                audioTracker.stop()
+            }
+            state.copy(
+                scanMode = mode,
+                stealthModeEnabled = if (isStealth) true else state.stealthModeEnabled,
+                isAudioSonarActive = if (isStealth) false else state.isAudioSonarActive
+            )
+        }
+    }
+
+    fun setRssiAlertThreshold(thresholdDbm: Int) {
+        _uiState.update { it.copy(rssiAlertThresholdDbm = thresholdDbm) }
+    }
+
+    fun toggleRssiAlert() {
+        _uiState.update { it.copy(isRssiAlertEnabled = !it.isRssiAlertEnabled) }
+    }
+
+    fun setEmfAlertThreshold(thresholdMicroTesla: Float) {
+        _uiState.update { it.copy(emfAlertThresholdMicroTesla = thresholdMicroTesla) }
+    }
+
+    fun setAcousticAlertThreshold(thresholdDb: Int) {
+        _uiState.update { it.copy(acousticAlertThresholdDb = thresholdDb) }
+    }
+
+    fun toggleStealthMode() {
+        val next = !_uiState.value.stealthModeEnabled
+        if (next) {
+            audioTracker.stop()
+            _uiState.update { it.copy(stealthModeEnabled = true, isAudioSonarActive = false) }
+        } else {
+            _uiState.update { it.copy(stealthModeEnabled = false) }
+        }
+    }
+
+    fun resetSettingsToDefaults() {
+        _uiState.update {
+            it.copy(
+                scanMode = ScanMode.TACTICAL_FULL,
+                rssiAlertThresholdDbm = -75,
+                isRssiAlertEnabled = true,
+                perimeterThresholdMeters = 5.0f,
+                warningZoneThresholdMeters = 10.0f,
+                perimeterSensitivityPreset = PerimeterSensitivityPreset.TACTICAL_GUARD,
+                hapticPulseFrequencyMs = 500L,
+                emfAlertThresholdMicroTesla = 50.0f,
+                acousticAlertThresholdDb = -50,
+                stealthModeEnabled = false,
+                isPerimeterAlarmEnabled = true,
+                selectedFilterType = "ALL"
+            )
         }
     }
 

@@ -24,37 +24,30 @@ class PerimeterAlarmEngine(private val context: Context) {
         }
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                if (vibratorManager?.defaultVibrator?.hasVibrator() == true) {
+                vibratorManager?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val effect = VibrationEffect.createWaveform(
                         longArrayOf(0, 150, 100, 200),
                         intArrayOf(0, 255, 0, 255),
                         -1
                     )
-                    vibratorManager.vibrate(CombinedVibration.createParallel(effect))
-                    lastVibrationTimeMs = now
+                    vibrator.vibrate(effect)
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(longArrayOf(0, 150, 100, 200), -1)
                 }
-            } else {
-                @Suppress("DEPRECATION")
-                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                if (vibrator?.hasVibrator() == true) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        val effect = VibrationEffect.createWaveform(
-                            longArrayOf(0, 150, 100, 200),
-                            intArrayOf(0, 255, 0, 255),
-                            -1
-                        )
-                        vibrator.vibrate(effect)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(longArrayOf(0, 150, 100, 200), -1)
-                    }
-                    lastVibrationTimeMs = now
-                }
+                lastVibrationTimeMs = now
             }
-        } catch (e: Exception) {
-            // Permission or hardware missing gracefully handled
+        } catch (e: Throwable) {
+            // Hardware or AppOps permission mismatch handled safely
         }
     }
 }
