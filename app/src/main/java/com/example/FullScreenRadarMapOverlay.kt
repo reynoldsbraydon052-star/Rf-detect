@@ -64,6 +64,28 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 @Composable
+fun FullScreenRadarScreen(
+    uiState: SignalRadarUiState,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onSetMapRange: (Float) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit,
+    onToggleAudioSonar: () -> Unit,
+    onSetFullScreenMapMode: (String) -> Unit
+) {
+    FullScreenRadarContent(
+        uiState = uiState,
+        onDismiss = null,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        onSetMapRange = onSetMapRange,
+        onSelectTargetDevice = onSelectTargetDevice,
+        onToggleAudioSonar = onToggleAudioSonar,
+        onSetFullScreenMapMode = onSetFullScreenMapMode
+    )
+}
+
+@Composable
 fun FullScreenRadarMapOverlay(
     uiState: SignalRadarUiState,
     onDismiss: () -> Unit,
@@ -74,101 +96,126 @@ fun FullScreenRadarMapOverlay(
     onToggleAudioSonar: () -> Unit,
     onSetFullScreenMapMode: (String) -> Unit
 ) {
-    val sensorSuite = uiState.sensorSuite
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
-            usePlatformDefaultWidth = false, // Edge-to-edge dialog canvas
+            usePlatformDefaultWidth = false,
             dismissOnBackPress = true,
             dismissOnClickOutside = false
         )
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF030705))
-                .testTag("fullscreen_radar_map_dialog")
+        FullScreenRadarContent(
+            uiState = uiState,
+            onDismiss = onDismiss,
+            onZoomIn = onZoomIn,
+            onZoomOut = onZoomOut,
+            onSetMapRange = onSetMapRange,
+            onSelectTargetDevice = onSelectTargetDevice,
+            onToggleAudioSonar = onToggleAudioSonar,
+            onSetFullScreenMapMode = onSetFullScreenMapMode
+        )
+    }
+}
+
+@Composable
+fun FullScreenRadarContent(
+    uiState: SignalRadarUiState,
+    onDismiss: (() -> Unit)? = null,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onSetMapRange: (Float) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit,
+    onToggleAudioSonar: () -> Unit,
+    onSetFullScreenMapMode: (String) -> Unit
+) {
+    val sensorSuite = uiState.sensorSuite
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF030705))
+            .testTag("fullscreen_radar_map_container")
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
+            // Top Header Bar
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF07120B),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f))
             ) {
-                // Top Header Bar
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF07120B),
-                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Left: Heading & GPS Badge
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Left: Heading & GPS Badge
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color(0xFF00FF66).copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(Color(0xFF00FF66).copy(alpha = 0.2f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Explore,
-                                    contentDescription = "Heading",
-                                    tint = Color(0xFF00FF66),
-                                    modifier = Modifier.size(20.dp)
+                            Icon(
+                                imageVector = Icons.Default.Explore,
+                                contentDescription = "Heading",
+                                tint = Color(0xFF00FF66),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "FULL SCREEN RADAR • ${uiState.headingDegrees.toInt()}° HEADING",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                            Text(
+                                text = "GPS 37.7749° N, 122.4194° W • ALT ${sensorSuite.estimatedAltitudeMeters.toInt()}m",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.LightGray
+                            )
+                        }
+                    }
+
+                    // Right Controls: Audio Sonar & Dismiss (if present)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Audio Sonar Quick Toggle
+                        IconButton(
+                            onClick = onToggleAudioSonar,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    if (uiState.isAudioSonarActive) Color(0xFFFFCC00).copy(alpha = 0.2f) else Color.DarkGray.copy(alpha = 0.4f),
+                                    CircleShape
                                 )
-                            }
-                            Column {
-                                Text(
-                                    text = "FULL SCREEN MAP • ${uiState.headingDegrees.toInt()}° HEADING",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 12.sp
-                                    ),
-                                    color = Color(0xFF00FF66)
-                                )
-                                Text(
-                                    text = "GPS 37.7749° N, 122.4194° W • ALT ${sensorSuite.estimatedAltitudeMeters.toInt()}m",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 9.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
-                                    color = Color.LightGray
-                                )
-                            }
+                                .testTag("fullscreen_map_audio_sonar_toggle")
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.isAudioSonarActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                                contentDescription = "Audio Sonar",
+                                tint = if (uiState.isAudioSonarActive) Color(0xFFFFCC00) else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
 
-                        // Right Controls: Audio Sonar & Close Button
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            // Audio Sonar Quick Toggle
-                            IconButton(
-                                onClick = onToggleAudioSonar,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(
-                                        if (uiState.isAudioSonarActive) Color(0xFFFFCC00).copy(alpha = 0.2f) else Color.DarkGray.copy(alpha = 0.4f),
-                                        CircleShape
-                                    )
-                                    .testTag("fullscreen_map_audio_sonar_toggle")
-                            ) {
-                                Icon(
-                                    imageVector = if (uiState.isAudioSonarActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                                    contentDescription = "Audio Sonar",
-                                    tint = if (uiState.isAudioSonarActive) Color(0xFFFFCC00) else Color.Gray,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
+                        if (onDismiss != null) {
                             // Close Dialog Button
                             IconButton(
                                 onClick = onDismiss,
@@ -187,193 +234,247 @@ fun FullScreenRadarMapOverlay(
                         }
                     }
                 }
+            }
 
-                // Map View Mode Selector Bar (Vector / Heatmap / Sat-Grid)
-                Row(
+            // Map View Mode Selector Bar (Vector / Heatmap / Sat-Grid)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF050B07))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "VIEW MODE:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp
+                    ),
+                    color = Color.Gray
+                )
+
+                listOf(
+                    "TACTICAL" to "TACTICAL VECTOR",
+                    "HEATMAP" to "IR HEATMAP",
+                    "SAT_GRID" to "SAT GRID"
+                ).forEach { (modeKey, modeTitle) ->
+                    val isSel = uiState.fullScreenMapMode == modeKey
+                    FilterChip(
+                        selected = isSel,
+                        onClick = { onSetFullScreenMapMode(modeKey) },
+                        label = {
+                            Text(
+                                modeTitle,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF00FF66),
+                            selectedLabelColor = Color.Black,
+                            containerColor = Color(0xFF0C1F13),
+                            labelColor = Color(0xFF00FF66)
+                        )
+                    )
+                }
+            }
+
+            // Main Radar Map Canvas Area (Fills max space)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                TacticalRadarCanvas(
+                    headingDegrees = uiState.headingDegrees,
+                    blips = uiState.activeBlips,
+                    nearestBlipId = uiState.nearestBlip?.id,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+                    mapRangeMeters = uiState.mapRangeMeters,
+                    isMapMaximized = true,
+                    onZoomIn = onZoomIn,
+                    onZoomOut = onZoomOut,
+                    onSetMapRange = onSetMapRange,
+                    onToggleMaximizeMap = {},
+                    onOpenFullScreenMap = {},
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Bottom Bar: PHONE HARDWARE SENSORS LIVE TELEMETRY STREAM
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF060E08),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f))
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF050B07))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = "VIEW MODE:",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 9.5.sp
-                        ),
-                        color = Color.Gray
-                    )
-
-                    listOf(
-                        "TACTICAL" to "TACTICAL VECTOR",
-                        "HEATMAP" to "IR HEATMAP",
-                        "SAT_GRID" to "SAT GRID"
-                    ).forEach { (modeKey, modeTitle) ->
-                        val isSel = uiState.fullScreenMapMode == modeKey
-                        FilterChip(
-                            selected = isSel,
-                            onClick = { onSetFullScreenMapMode(modeKey) },
-                            label = {
-                                Text(
-                                    modeTitle,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF00FF66),
-                                selectedLabelColor = Color.Black,
-                                containerColor = Color(0xFF0C1F13),
-                                labelColor = Color(0xFF00FF66)
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "GOOGLE PIXEL ALL-HARDWARE SENSORS TELEMETRY STREAM",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.5.sp,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = Color(0xFF00FF66)
+                        )
+                        Text(
+                            text = "${sensorSuite.totalActiveSensorsCount} Pixel Sensors Active",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color(0xFF00E5FF)
                         )
                     }
-                }
 
-                // Main Radar Map Canvas Area (Fills max space)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
-                    TacticalRadarCanvas(
-                        headingDegrees = uiState.headingDegrees,
-                        blips = uiState.activeBlips,
-                        nearestBlipId = uiState.nearestBlip?.id,
-                        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
-                        mapRangeMeters = uiState.mapRangeMeters,
-                        isMapMaximized = true,
-                        onZoomIn = onZoomIn,
-                        onZoomOut = onZoomOut,
-                        onSetMapRange = onSetMapRange,
-                        onToggleMaximizeMap = {},
-                        onOpenFullScreenMap = {},
-                        onSelectTargetDevice = onSelectTargetDevice,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-
-                // Bottom Bar: PHONE HARDWARE SENSORS LIVE TELEMETRY STREAM
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF060E08),
-                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    // Scrollable Telemetry Readouts Row across all hardware sensors
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "LIVE PHONE HARDWARE SENSORS & TELEMETRY STREAM",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.5.sp,
-                                    letterSpacing = 0.5.sp
-                                ),
-                                color = Color(0xFF00FF66)
-                            )
-                            Text(
-                                text = "${sensorSuite.totalActiveSensorsCount} Active Sensors Operational",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp
-                                ),
-                                color = Color(0xFF00E5FF)
+                        // 1. Magnetometer
+                        item {
+                            SensorMetricPill(
+                                label = "3D MAGNETOMETER",
+                                value = "${sensorSuite.magnetometerData.totalMicroTesla.toInt()} µT",
+                                subValue = "Bx:%.0f By:%.0f Bz:%.0f".format(sensorSuite.magnetometerData.x, sensorSuite.magnetometerData.y, sensorSuite.magnetometerData.z),
+                                accentColor = Color(0xFF00FF66)
                             )
                         }
-
-                        // Scrollable Telemetry Readouts Row across all hardware sensors
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // 1. Magnetometer
-                            item {
-                                SensorMetricPill(
-                                    label = "MAGNETOMETER",
-                                    value = "${sensorSuite.magnetometerData.totalMicroTesla.toInt()} µT",
-                                    subValue = "Baseline: -${sensorSuite.magnetometerData.baselineTotalMicroTesla.toInt()} µT",
-                                    accentColor = Color(0xFF00FF66)
-                                )
-                            }
-                            // 2. Accelerometer / G-Force
-                            item {
-                                SensorMetricPill(
-                                    label = "G-FORCE ACCEL",
-                                    value = "%.2f G".format(sensorSuite.totalGForce),
-                                    subValue = if (sensorSuite.isMotionDetected) "MOTION ACTIVE" else "STATIONARY",
-                                    accentColor = if (sensorSuite.isMotionDetected) Color(0xFFFFCC00) else Color(0xFF00FF66)
-                                )
-                            }
-                            // 3. Gyroscope Rotational Speed
-                            item {
-                                SensorMetricPill(
-                                    label = "GYROSCOPE",
-                                    value = "%.1f °/s".format(sensorSuite.rotationalSpeedDegPerSec),
-                                    subValue = "Vib: %.1f Hz".format(sensorSuite.vibrationHz),
-                                    accentColor = Color(0xFF00E5FF)
-                                )
-                            }
-                            // 4. Barometer & Pressure Altitude
-                            item {
-                                SensorMetricPill(
-                                    label = "BAROMETER",
-                                    value = "${sensorSuite.pressureHpa.toInt()} hPa",
-                                    subValue = "Alt: ${sensorSuite.estimatedAltitudeMeters.toInt()}m",
-                                    accentColor = Color(0xFFFF8800)
-                                )
-                            }
-                            // 5. Ambient Light Lux Meter
-                            item {
-                                SensorMetricPill(
-                                    label = "LIGHT LUX",
-                                    value = "${sensorSuite.lightLux.toInt()} Lux",
-                                    subValue = sensorSuite.lightCondition,
-                                    accentColor = Color.Yellow
-                                )
-                            }
-                            // 6. Infrared Proximity
-                            item {
-                                SensorMetricPill(
-                                    label = "PROXIMITY",
-                                    value = if (sensorSuite.isProximityNear) "NEAR (<1cm)" else "FAR (5.0cm)",
-                                    subValue = "IR Sensor Active",
-                                    accentColor = if (sensorSuite.isProximityNear) Color(0xFFFF3366) else Color.Gray
-                                )
-                            }
-                            // 7. Orientation Pitch & Roll
-                            item {
-                                SensorMetricPill(
-                                    label = "ORIENTATION",
-                                    value = "Pitch ${sensorSuite.pitchDeg.toInt()}°",
-                                    subValue = "Roll ${sensorSuite.rollDeg.toInt()}°",
-                                    accentColor = Color(0xFF00FF66)
-                                )
-                            }
-                            // 8. Step Counter / PDR
-                            item {
-                                SensorMetricPill(
-                                    label = "STEP PDR",
-                                    value = "${sensorSuite.stepCount} Steps",
-                                    subValue = "PDR: %.1fm".format(sensorSuite.pdrDistanceMeters),
-                                    accentColor = Color(0xFF00E5FF)
-                                )
-                            }
+                        // 2. Accelerometer / G-Force
+                        item {
+                            SensorMetricPill(
+                                label = "ACCELEROMETER",
+                                value = "%.2f G".format(sensorSuite.totalGForce),
+                                subValue = if (sensorSuite.isMotionDetected) "MOTION ACTIVE" else "STATIONARY",
+                                accentColor = if (sensorSuite.isMotionDetected) Color(0xFFFFCC00) else Color(0xFF00FF66)
+                            )
+                        }
+                        // 3. Gyroscope Rotational Speed
+                        item {
+                            SensorMetricPill(
+                                label = "GYROSCOPE",
+                                value = "%.1f °/s".format(sensorSuite.rotationalSpeedDegPerSec),
+                                subValue = "Vib: %.1f Hz".format(sensorSuite.vibrationHz),
+                                accentColor = Color(0xFF00E5FF)
+                            )
+                        }
+                        // 4. Barometer & Pressure Altitude
+                        item {
+                            SensorMetricPill(
+                                label = "BAROMETER",
+                                value = "${sensorSuite.pressureHpa.toInt()} hPa",
+                                subValue = "Alt: ${sensorSuite.estimatedAltitudeMeters.toInt()}m",
+                                accentColor = Color(0xFFFF8800)
+                            )
+                        }
+                        // 5. Ambient Light Lux Meter
+                        item {
+                            SensorMetricPill(
+                                label = "AMBIENT LIGHT",
+                                value = "${sensorSuite.lightLux.toInt()} Lux",
+                                subValue = sensorSuite.lightCondition,
+                                accentColor = Color.Yellow
+                            )
+                        }
+                        // 6. Infrared Proximity
+                        item {
+                            SensorMetricPill(
+                                label = "IR PROXIMITY",
+                                value = if (sensorSuite.isProximityNear) "NEAR (<1cm)" else "FAR (5cm)",
+                                subValue = "Obstruct Sensing",
+                                accentColor = if (sensorSuite.isProximityNear) Color(0xFFFF3366) else Color.Gray
+                            )
+                        }
+                        // 7. Orientation Pitch & Roll
+                        item {
+                            SensorMetricPill(
+                                label = "ROTATION VECTOR",
+                                value = "${uiState.headingDegrees.toInt()}° Compass",
+                                subValue = "P:${sensorSuite.pitchDeg.toInt()}° R:${sensorSuite.rollDeg.toInt()}°",
+                                accentColor = Color(0xFF00FF66)
+                            )
+                        }
+                        // 8. Step Counter / PDR
+                        item {
+                            SensorMetricPill(
+                                label = "STEP DEAD RECKONING",
+                                value = "${sensorSuite.stepCount} Steps",
+                                subValue = "Dist: %.1fm".format(sensorSuite.pdrDistanceMeters),
+                                accentColor = Color(0xFF00E5FF)
+                            )
+                        }
+                        // 9. Gravity Sensor
+                        item {
+                            SensorMetricPill(
+                                label = "GRAVITY VECTOR",
+                                value = "Gx:%.1f Gy:%.1f".format(sensorSuite.gravityX, sensorSuite.gravityY),
+                                subValue = "Gz:%.1f m/s²".format(sensorSuite.gravityZ),
+                                accentColor = Color(0xFFFFCC00)
+                            )
+                        }
+                        // 10. Linear Acceleration
+                        item {
+                            SensorMetricPill(
+                                label = "LINEAR ACCEL",
+                                value = "Lx:%.1f Ly:%.1f".format(sensorSuite.linearAccelX, sensorSuite.linearAccelY),
+                                subValue = "Impulse Motion",
+                                accentColor = Color(0xFF00FF66)
+                            )
+                        }
+                        // 11. Uncalibrated EMF
+                        item {
+                            SensorMetricPill(
+                                label = "RAW UNCALIB EMF",
+                                value = "Ux:%.0f Uy:%.0f".format(sensorSuite.uncalibratedMagX, sensorSuite.uncalibratedMagY),
+                                subValue = "Soft-Iron Bias",
+                                accentColor = Color(0xFFFF00FF)
+                            )
+                        }
+                        // 12. Thermal Sensor
+                        item {
+                            SensorMetricPill(
+                                label = "THERMAL SPECTRUM",
+                                value = "%.1f °C".format(sensorSuite.ambientTempCelsius),
+                                subValue = "Humidity: %.0f%%".format(sensorSuite.relativeHumidityPct),
+                                accentColor = Color(0xFFFF5500)
+                            )
+                        }
+                        // 13. Game Rotation
+                        item {
+                            SensorMetricPill(
+                                label = "GAME ROTATION",
+                                value = "${sensorSuite.gameRotationHeading.toInt()}° Kinematics",
+                                subValue = "Low-Latency Tracking",
+                                accentColor = Color(0xFF00E5FF)
+                            )
+                        }
+                        // 14. Stationarity
+                        item {
+                            SensorMetricPill(
+                                label = "PIXEL MOTION STATE",
+                                value = sensorSuite.motionState,
+                                subValue = if (sensorSuite.isStationary) "MOUNTED STABLE" else "HANDHELD SWEEP",
+                                accentColor = Color(0xFF00FF66)
+                            )
                         }
                     }
                 }

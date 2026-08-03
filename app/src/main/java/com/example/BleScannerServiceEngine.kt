@@ -81,12 +81,45 @@ class BleScannerServiceEngine(
                 Triple("CS:60:13:99:A2:80", "Galaxy SmartTag CS Precision", "0x1BFF7500CS6079CH"),
                 Triple("CS:60:04:31:8B:17", "High-Precision CS Centimeter Beacon", "0x020106CS60PBRRTT"),
 
-                // Legacy BLE Standard RSSI Beacons:
+                // Trackers & Location Tags:
                 Triple("4C:11:AE:88:92:01", "Apple AirTag Beacon", "0x4C0002154A88"),
-                Triple("68:37:E9:12:04:F8", "BLE Smart Keycard", "0x0201060303E0FE"),
                 Triple("00:2B:F4:71:D9:C3", "Tile Pro Tracker", "0x0201041106A9A0"),
                 Triple("D4:F5:13:99:A2:80", "Galaxy SmartTag2", "0x0201061BFF7500"),
-                Triple("FC:A1:04:31:8B:17", "BLE Environmental Sensor", "0x020106090953656E")
+                Triple("E8:90:3A:42:1B:09", "Chipolo ONE Spot Tracker", "0x0201060303FE2C"),
+
+                // Wearables & Smartwatches:
+                Triple("A4:C1:38:91:2E:88", "Apple Watch Ultra 2", "0x4C001005011C"),
+                Triple("80:7A:BF:14:8B:02", "Pixel Watch 3 (UWB/BLE)", "0x0201060B09506978656C"),
+                Triple("F4:60:E2:09:1F:D3", "Galaxy Watch6 Classic", "0x0201061BFF75000100"),
+                Triple("B8:1F:A4:77:81:45", "Garmin Fenix 8 Solar", "0x0201060A094761726D696E"),
+                Triple("DC:2C:26:99:41:F0", "Oura Ring Gen3 Wearable", "0x0201060303FE9F"),
+                Triple("3C:A6:2F:11:4A:8C", "Whoop 4.0 Fitness Strap", "0x020106090957686F6F70"),
+
+                // Audio & Headsets:
+                Triple("28:FF:3C:90:B1:05", "AirPods Pro 2 Sound Node", "0x4C000719010220"),
+                Triple("94:DB:DA:82:19:FA", "Sony WH-1000XM5 ANC Headset", "0x0201060A09536F6E795748"),
+                Triple("00:08:E2:17:80:CC", "Bose QuietComfort Earbuds", "0x0201060909426F73655143"),
+
+                // Hidden Surveillance & Wireless Bugs:
+                Triple("68:C6:3A:01:99:40", "Hidden Wi-Fi Micro-Camera", "0x0201060303F30A"),
+                Triple("10:52:1C:8A:DF:03", "Acoustic Ultrasonic Bug (19kHz)", "0x0201060B09556C747261"),
+                Triple("E4:AA:EC:32:00:19", "RF Signal Transmitter Bug", "0x0201060303FE01"),
+
+                // Drones & UAV RF Transmitters:
+                Triple("60:60:1F:8A:2C:90", "DJI Mavic 3 Pro Remote Link", "0x0201060709444A494D33"),
+                Triple("A0:92:08:43:BF:10", "Autel Robotics EVO II Drone", "0x0201060809417574656C"),
+
+                // Automotive & Keyless Entry:
+                Triple("68:37:E9:12:04:F8", "Smart Keyfob Digital Entry", "0x0201060303E0FE"),
+                Triple("C8:D0:83:19:92:B1", "Tesla Phone Key UWB Beacon", "0x02010607095465736C61"),
+
+                // Smart Home & IoT Gateways:
+                Triple("B4:E6:2D:00:11:82", "Sonos Arc Soundbar IoT", "0x0201060709536F6E6F73"),
+                Triple("70:EE:50:88:90:1C", "Apple TV 4K AirPlay Node", "0x4C0010070110"),
+                Triple("FC:A1:04:31:8B:17", "BLE Environmental Sensor", "0x020106090953656E"),
+
+                // Medical & Health Sensors:
+                Triple("F0:99:B6:11:82:40", "Dexcom G7 Continuous Glucose Sensor", "0x0201060709446578636F")
             )
 
             while (isActive && isScanning) {

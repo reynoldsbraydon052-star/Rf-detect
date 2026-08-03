@@ -263,7 +263,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                 TacticalHeader(
                     uiState = uiState,
                     onOpenSettings = { viewModel.setTab(RadarTab.SETTINGS) },
-                    onOpenDocOverlay = { showHardwareDocOverlay = true }
+                    onOpenDocOverlay = { showHardwareDocOverlay = true },
+                    onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) }
                 )
 
                 // Accompanist Permissions Banner for Location Access (required for Bluetooth & Wi-Fi scanning)
@@ -493,6 +494,16 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onPlayTestPing = { viewModel.playTestAudioPing(it) }
                         )
 
+                        RadarTab.FULL_RADAR -> FullScreenRadarScreen(
+                            uiState = uiState,
+                            onZoomIn = { viewModel.zoomInMap() },
+                            onZoomOut = { viewModel.zoomOutMap() },
+                            onSetMapRange = { viewModel.setMapRangeMeters(it) },
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onToggleAudioSonar = { viewModel.toggleAudioSonar() },
+                            onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) }
+                        )
+
                         RadarTab.SPECTRUM_ANALYZER -> SpectrumAnalyzerScreen(
                             uiState = uiState,
                             onFilterSelected = { viewModel.setFilterType(it) }
@@ -571,7 +582,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
 fun TacticalHeader(
     uiState: SignalRadarUiState,
     onOpenSettings: (() -> Unit)? = null,
-    onOpenDocOverlay: (() -> Unit)? = null
+    onOpenDocOverlay: (() -> Unit)? = null,
+    onOpenFullRadar: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -620,7 +632,7 @@ fun TacticalHeader(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Universal Android • 100% Hardware Sensors Offline",
+                        text = "Google Pixel Spectrum • 100% Sensors Active",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -631,6 +643,38 @@ fun TacticalHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (onOpenFullRadar != null) {
+                    Surface(
+                        onClick = onOpenFullRadar,
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (uiState.selectedTab == RadarTab.FULL_RADAR) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.testTag("header_open_full_radar_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Radar,
+                                contentDescription = "Full Radar",
+                                tint = if (uiState.selectedTab == RadarTab.FULL_RADAR) Color.Black else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "FULL RADAR",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = if (uiState.selectedTab == RadarTab.FULL_RADAR) Color.Black else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
                 if (onOpenDocOverlay != null) {
                     IconButton(
                         onClick = onOpenDocOverlay,
@@ -2200,6 +2244,7 @@ fun BottomRadarNavBar(
                         Icon(
                             imageVector = when (tab) {
                                 RadarTab.SWEEP_RADAR -> Icons.Default.Radar
+                                RadarTab.FULL_RADAR -> Icons.Default.Radar
                                 RadarTab.SPECTRUM_ANALYZER -> Icons.Default.GraphicEq
                                 RadarTab.DETECTED_SENSORS -> Icons.Default.Sensors
                                 RadarTab.HISTORIC_HEATMAP -> Icons.Default.Map
@@ -2215,6 +2260,7 @@ fun BottomRadarNavBar(
                         Text(
                             text = when (tab) {
                                 RadarTab.SWEEP_RADAR -> "Sweep"
+                                RadarTab.FULL_RADAR -> "Full Radar"
                                 RadarTab.SPECTRUM_ANALYZER -> "Spectrum"
                                 RadarTab.DETECTED_SENSORS -> "Sensors"
                                 RadarTab.HISTORIC_HEATMAP -> "Heatmap"
@@ -2823,6 +2869,311 @@ fun DetectedSensorsScreen(
                                 )
                                 Text(
                                     text = "Pedestrian Inertial Nav",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00E5FF)
+                                )
+                            }
+                        }
+                    }
+
+                    // Gravity Vector Sensor
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFFFFCC00).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Gravity Vector",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFFFFCC00)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Sensors,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFCC00),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Gx:%.1f Gy:%.1f".format(sensor.gravityX, sensor.gravityY),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFFCC00)
+                                )
+                                Text(
+                                    text = "Gz: %.1f m/s² Vertical".format(sensor.gravityZ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Earth Gravitational Isolation",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+
+                    // Linear Acceleration (No Gravity Component)
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Linear Accel",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFF00FF66)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00FF66),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Lx:%.1f Ly:%.1f".format(sensor.linearAccelX, sensor.linearAccelY),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                                Text(
+                                    text = "Lz: %.1f m/s² Impulse".format(sensor.linearAccelZ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Dynamic User Kinematics",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00E5FF)
+                                )
+                            }
+                        }
+                    }
+
+                    // Uncalibrated EMF Magnetometer
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFFFF00FF).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Uncalibrated EMF",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFFFF00FF)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Sensors,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF00FF),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Ux:%.0f Uy:%.0f".format(sensor.uncalibratedMagX, sensor.uncalibratedMagY),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFF00FF)
+                                )
+                                Text(
+                                    text = "Uz: %.0f µT Raw EMF".format(sensor.uncalibratedMagZ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Iron Distortion Isolation",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFFCC00)
+                                )
+                            }
+                        }
+                    }
+
+                    // Ambient Thermal & Relative Humidity
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFFFF5500).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Ambient Thermal",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFFFF5500)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Sensors,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF5500),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "%.1f °C Thermal".format(sensor.ambientTempCelsius),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFF5500)
+                                )
+                                Text(
+                                    text = "Humidity: %.0f%% RH".format(sensor.relativeHumidityPct),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Environment Thermal Sweep",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+
+                    // Pixel Motion State & Stationarity Detector
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Pixel Motion State",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFF00FF66)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00FF66),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = sensor.motionState,
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                                Text(
+                                    text = if (sensor.isStationary) "MOUNTED / TRIPOD STABLE" else "HANDHELD SWEEPING",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Stationary Detector Active",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace

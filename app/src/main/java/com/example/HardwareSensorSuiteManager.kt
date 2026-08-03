@@ -56,8 +56,43 @@ data class HardwareSensorSuiteData(
     val stepCount: Int = 0,
     val pdrDistanceMeters: Float = 0.0f,
 
+    // Gravity & Linear Acceleration
+    val gravityX: Float = 0f,
+    val gravityY: Float = 0f,
+    val gravityZ: Float = 9.81f,
+    val linearAccelX: Float = 0f,
+    val linearAccelY: Float = 0f,
+    val linearAccelZ: Float = 0f,
+
+    // Uncalibrated Magnetometer & Gyroscope
+    val uncalibratedMagX: Float = 0f,
+    val uncalibratedMagY: Float = 0f,
+    val uncalibratedMagZ: Float = 0f,
+    val uncalibratedGyroX: Float = 0f,
+    val uncalibratedGyroY: Float = 0f,
+    val uncalibratedGyroZ: Float = 0f,
+
+    // Thermal / Environmental
+    val ambientTempCelsius: Float = 24.5f,
+    val relativeHumidityPct: Float = 45.0f,
+
+    // Game Rotation Vector
+    val gameRotationHeading: Float = 0f,
+
+    // Motion & Stationarity
+    val isStationary: Boolean = true,
+    val motionState: String = "STATIONARY MOUNT",
+
+    // Acoustic Ultrasonic Spectrum Sensor
+    val acousticFreqHz: Float = 18500f,
+    val isUltrasoundDetected: Boolean = false,
+
+    // Wireless Radio Spectrum Sensors
+    val wifiChannelRssi: Int = -58,
+    val bleRadioRssi: Int = -62,
+
     // Active Sensor Count & Summary
-    val totalActiveSensorsCount: Int = 8,
+    val totalActiveSensorsCount: Int = 16,
     val activeSensorsList: List<String> = listOf(
         "3-Axis Magnetometer (EMF)",
         "3-Axis Accelerometer (G-Force)",
@@ -66,7 +101,15 @@ data class HardwareSensorSuiteData(
         "Ambient Light Sensor (Lux)",
         "Infrared Proximity Sensor",
         "Rotation Vector (Compass Azimuth)",
-        "Step Counter (PDR Dead Reckoning)"
+        "Step Counter (PDR Dead Reckoning)",
+        "Gravity Sensor (Spatial Tilt)",
+        "Linear Acceleration Sensor (Motion Impulse)",
+        "Uncalibrated Magnetometer (Raw EMF)",
+        "Uncalibrated Gyroscope (Raw Rotation)",
+        "Ambient Thermal Sensor (Temperature)",
+        "Relative Humidity Sensor",
+        "Game Rotation Vector (Low-Latency Kinematics)",
+        "Pixel Motion & Stationarity Detector"
     )
 )
 
@@ -85,6 +128,16 @@ class HardwareSensorSuiteManager(
     private val sensorProximity = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
     private val sensorRotation = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val sensorStep = sensorManager?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+    private val sensorGravity = sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+    private val sensorLinearAccel = sensorManager?.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+    private val sensorUncalibMag = sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED)
+    private val sensorUncalibGyro = sensorManager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
+    private val sensorTemp = sensorManager?.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE)
+    private val sensorHumidity = sensorManager?.getDefaultSensor(Sensor.TYPE_RELATIVE_HUMIDITY)
+    private val sensorGameRotation = sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val sensorStationary = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+        sensorManager?.getDefaultSensor(Sensor.TYPE_STATIONARY_DETECT)
+    } else null
 
     private var currentSuiteData = HardwareSensorSuiteData()
     private var isListening = false
@@ -108,6 +161,14 @@ class HardwareSensorSuiteManager(
             sensorProximity?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
             sensorRotation?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
             sensorStep?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorGravity?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorLinearAccel?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorUncalibMag?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorUncalibGyro?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorTemp?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorHumidity?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorGameRotation?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            sensorStationary?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
         }
 
         startFallbackSimulation()
