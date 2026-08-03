@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "sense"
+rootProject.name = "spec anal"
 
 include(":app")
