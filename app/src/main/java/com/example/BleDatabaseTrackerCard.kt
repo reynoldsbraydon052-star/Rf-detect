@@ -56,6 +56,7 @@ fun BleDatabaseTrackerCard(
                     device.macAddress.contains(searchQuery, ignoreCase = true)
 
             val matchesFilter = when (selectedProximityFilter) {
+                "BT60_CS" -> device.isChannelSoundingCapable
                 "MICRO" -> device.distanceMeters <= 5.0f
                 "IMMEDIATE" -> device.distanceMeters > 5.0f && device.distanceMeters <= 15.0f
                 "FAR" -> device.distanceMeters > 15.0f
@@ -168,7 +169,7 @@ fun BleDatabaseTrackerCard(
                 shape = RoundedCornerShape(10.dp)
             )
 
-            // Proximity Filter Chips
+            // Proximity & Protocol Filter Chips
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -188,12 +189,31 @@ fun BleDatabaseTrackerCard(
                     )
                 )
 
+                val csCount = bleDevices.count { it.isChannelSoundingCapable }
+                FilterChip(
+                    selected = selectedProximityFilter == "BT60_CS",
+                    onClick = { selectedProximityFilter = "BT60_CS" },
+                    label = {
+                        Text(
+                            "BT 6.0 CS ($csCount)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF00FF66),
+                        selectedLabelColor = Color.Black
+                    )
+                )
+
                 FilterChip(
                     selected = selectedProximityFilter == "MICRO",
                     onClick = { selectedProximityFilter = "MICRO" },
                     label = {
                         Text(
-                            "< 5m MICRO",
+                            "< 5m",
                             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace)
                         )
                     },
@@ -345,6 +365,23 @@ fun BleDeviceRoomTile(
                                 ),
                                 color = Color.White
                             )
+                            if (device.isChannelSoundingCapable) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF00FF66)
+                                ) {
+                                    Text(
+                                        text = "BT 6.0 CS",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color.Black,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
                             if (isSelectedTarget) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
@@ -380,15 +417,15 @@ fun BleDeviceRoomTile(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = proximityColor.copy(alpha = 0.2f)
+                        color = if (device.isChannelSoundingCapable) Color(0xFF00FF66).copy(alpha = 0.25f) else proximityColor.copy(alpha = 0.2f)
                     ) {
                         Text(
-                            text = "%.1f m".format(device.distanceMeters),
+                            text = if (device.isChannelSoundingCapable) "%.2f m ±%.2fm".format(device.distanceMeters, device.csEstimatedAccuracyMeters) else "%.1f m".format(device.distanceMeters),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Black,
                                 fontFamily = FontFamily.Monospace
                             ),
-                            color = proximityColor,
+                            color = if (device.isChannelSoundingCapable) Color(0xFF00FF66) else proximityColor,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
@@ -419,7 +456,7 @@ fun BleDeviceRoomTile(
                         .weight(1f)
                         .height(6.dp)
                         .clip(RoundedCornerShape(3.dp)),
-                    color = proximityColor,
+                    color = if (device.isChannelSoundingCapable) Color(0xFF00FF66) else proximityColor,
                     trackColor = Color(0xFF1E3A2B)
                 )
                 Text(
@@ -431,6 +468,70 @@ fun BleDeviceRoomTile(
                     ),
                     color = Color.Yellow
                 )
+            }
+
+            // Bluetooth 6.0 Channel Sounding High-Precision Ranging Metrics
+            if (device.isChannelSoundingCapable) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF06140D),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "CHANNEL SOUNDING PBR + RTT METRICS",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                            Text(
+                                text = "±%.2fm CS Accuracy".format(device.csEstimatedAccuracyMeters),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color(0xFF00E5FF)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Method: ${device.csRangingMethod}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, fontFamily = FontFamily.Monospace),
+                                color = Color.LightGray
+                            )
+                            Text(
+                                text = "Phase Quality: ${device.csPhaseQualityIndex}% (${device.csChannelCount} Channels)",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, fontFamily = FontFamily.Monospace),
+                                color = Color.LightGray
+                            )
+                        }
+
+                        if (device.csRttTimeOfFlightNs > 0f) {
+                            Text(
+                                text = "Flight Time: %.1f ns ToF • Sub-meter multipath anti-fading active".format(device.csRttTimeOfFlightNs),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, fontFamily = FontFamily.Monospace),
+                                color = Color(0xFF00E5FF)
+                            )
+                        }
+                    }
+                }
             }
 
             // Proximity Audio Action Controls

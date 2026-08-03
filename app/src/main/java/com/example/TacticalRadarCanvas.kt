@@ -58,6 +58,7 @@ fun TacticalRadarCanvas(
     onZoomOut: () -> Unit = {},
     onSetMapRange: (Float) -> Unit = {},
     onToggleMaximizeMap: () -> Unit = {},
+    onOpenFullScreenMap: () -> Unit = {},
     onSelectTargetDevice: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -343,20 +344,50 @@ fun TacticalRadarCanvas(
                     )
                 }
 
+                // Bluetooth 6.0 Channel Sounding (CS) Sub-Meter Precision Halo & Reticle
+                if (blip.isChannelSoundingCapable && !isSelectedTarget) {
+                    val csHaloRadius = ((blip.csEstimatedAccuracyMeters / maxDistanceRange) * maxRadius).coerceIn(8f, 35f)
+                    // Precision Halo Ring representing sub-meter error margin
+                    drawCircle(
+                        color = Color(0xFF00E5FF).copy(alpha = 0.55f),
+                        radius = csHaloRadius,
+                        center = Offset(blipX, blipY),
+                        style = Stroke(width = 1.8f)
+                    )
+                    // High-Precision CS Diamond Reticle
+                    val diamondPath = Path().apply {
+                        moveTo(blipX, blipY - 12f)
+                        lineTo(blipX + 12f, blipY)
+                        lineTo(blipX, blipY + 12f)
+                        lineTo(blipX - 12f, blipY)
+                        close()
+                    }
+                    drawPath(
+                        path = diamondPath,
+                        color = Color(0xFF00E5FF),
+                        style = Stroke(width = 2f)
+                    )
+                }
+
                 // Blip Dot
                 drawCircle(
-                    color = if (isSelectedTarget) Color.Yellow else nodeColor,
-                    radius = if (isSelectedTarget || isNearestTarget) 11f else 8f,
+                    color = if (isSelectedTarget) Color.Yellow else if (blip.isChannelSoundingCapable) Color(0xFF00E5FF) else nodeColor,
+                    radius = if (isSelectedTarget || isNearestTarget) 11f else if (blip.isChannelSoundingCapable) 9f else 8f,
                     center = Offset(blipX, blipY)
                 )
 
                 // Name tag
                 if (!isSelectedTarget) {
+                    val labelText = if (blip.isChannelSoundingCapable) {
+                        "${blip.name.take(10)} (%.1fm ±%.2fm CS)".format(blip.distance, blip.csEstimatedAccuracyMeters)
+                    } else {
+                        "${blip.name.take(12)} (%.1fm)".format(blip.distance)
+                    }
                     drawContext.canvas.nativeCanvas.drawText(
-                        "${blip.name.take(12)} (%.1fm)".format(blip.distance),
+                        labelText,
                         blipX + 14f,
                         blipY + 6f,
-                        blipTextPaint
+                        if (blip.isChannelSoundingCapable) targetTextPaint else blipTextPaint
                     )
                 }
             }
@@ -427,12 +458,13 @@ fun TacticalRadarCanvas(
             }
         }
 
-        // Overlay Range Presets Chips Top Left
+        // Overlay Range Presets Chips & Full Screen Map Button Top Left
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             listOf(5f, 15f, 30f, 60f).forEach { rangePreset ->
                 val isSelected = mapRangeMeters.toInt() == rangePreset.toInt()
@@ -453,6 +485,37 @@ fun TacticalRadarCanvas(
                         ),
                         color = if (isSelected) Color.Black else Color(0xFF00FF66),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFF00E5FF),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
+                modifier = Modifier
+                    .clickable { onOpenFullScreenMap() }
+                    .testTag("open_fullscreen_map_pill_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Fullscreen,
+                        contentDescription = "Full Screen Map",
+                        tint = Color.Black,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "FULL SCREEN MAP",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.Black
                     )
                 }
             }

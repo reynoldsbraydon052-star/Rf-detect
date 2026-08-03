@@ -9,5 +9,8 @@ data class RadarBlip(
     val rssi: Int = -60,
     val frequencyMhz: Double = 2412.0,
     val bandLabel: String = "2.4 GHz",
-    val timestampMs: Long = System.currentTimeMillis()
+    val timestampMs: Long = System.currentTimeMillis(),
+    val isChannelSoundingCapable: Boolean = false,
+    val csEstimatedAccuracyMeters: Float = 3.5f,
+    val csRangingMethod: String = "RSSI Fallback"
 )

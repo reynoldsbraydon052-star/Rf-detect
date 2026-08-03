@@ -1,6 +1,8 @@
 package com.example
 
 import android.app.Application
+import android.content.Intent
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
@@ -126,7 +128,16 @@ data class SignalRadarUiState(
     // Interactive Map & Proximity Sonar State:
     val mapRangeMeters: Float = 30.0f,
     val selectedTargetDeviceId: String? = null,
-    val isMapMaximized: Boolean = false
+    val isMapMaximized: Boolean = false,
+    // Full Screen Map Option & Phone Hardware Sensor Suite State:
+    val isFullScreenMapVisible: Boolean = false,
+    val fullScreenMapMode: String = "TACTICAL", // "TACTICAL", "HEATMAP", "SAT_GRID"
+    val sensorSuite: HardwareSensorSuiteData = HardwareSensorSuiteData(),
+    // Background Alert Service & Threshold Notification Settings State:
+    val isBackgroundAlertServiceActive: Boolean = true,
+    val isHapticAlertsEnabled: Boolean = true,
+    val isVisualNotifsEnabled: Boolean = true,
+    val activeDeviceAlerts: List<DeviceAlertEvent> = emptyList()
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -143,6 +154,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private var orientationManager: OrientationManager? = null
     private var magnetometerDetector: MagnetometerDetector? = null
     private var acousticDetector: AcousticFrequencyDetector? = null
+    private var hardwareSensorSuiteManager: HardwareSensorSuiteManager? = null
 
     private val kalmanFilters = mutableMapOf<String, KalmanFilter>()
     private val blipMap = mutableMapOf<String, RadarBlip>()
@@ -198,6 +210,50 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
         acousticDetector?.startListening()
 
+        // Setup All Phone Hardware Sensors Suite Manager
+        hardwareSensorSuiteManager = HardwareSensorSuiteManager(application) { suiteData ->
+            _uiState.update { state ->
+                state.copy(
+                    sensorSuite = suiteData,
+                    headingDegrees = if (suiteData.compassHeading > 0f) suiteData.compassHeading else state.headingDegrees
+                )
+            }
+        }
+        hardwareSensorSuiteManager?.startListening()
+
+        // Setup BLE Repository Device Scanning Threshold Callback
+        bleRepository.onDeviceScannedListener = { device, isNew ->
+            val currentState = _uiState.value
+            if (currentState.isRssiAlertEnabled && device.rssi >= currentState.rssiAlertThresholdDbm) {
+                ScannerBackgroundAlertService.notifyDeviceDetected(
+                    context = application,
+                    macAddress = device.macAddress,
+                    deviceName = device.deviceName,
+                    rssi = device.rssi,
+                    distanceMeters = device.distanceMeters,
+                    thresholdRssi = currentState.rssiAlertThresholdDbm,
+                    isNewDevice = isNew,
+                    enableHaptics = currentState.isHapticAlertsEnabled,
+                    enableVisualNotif = currentState.isVisualNotifsEnabled
+                )
+            }
+        }
+
+        // Collect background alert service device notifications for live UI alerts
+        viewModelScope.launch {
+            ScannerBackgroundAlertService.alertEvents.collect { alert ->
+                _uiState.update { state ->
+                    val filtered = state.activeDeviceAlerts.filterNot { it.id == alert.id }
+                    state.copy(activeDeviceAlerts = listOf(alert) + filtered)
+                }
+            }
+        }
+
+        // Auto-start background alert service
+        if (_uiState.value.isBackgroundAlertServiceActive) {
+            startBackgroundAlertService()
+        }
+
         // Start Bluetooth LE scanner service & observe SQLite Room Database
         bleScannerService.startScannerService()
         viewModelScope.launch {
@@ -207,6 +263,12 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 // Map database BLE devices to sweep radar
                 bleDevices.forEach { dev ->
                     val angle = (dev.macAddress.hashCode().run { Math.abs(this) % 360 }).toFloat()
+                    val isCs = dev.isChannelSoundingCapable
+                    val bandLabelText = if (isCs) {
+                        "BT 6.0 CS (±${String.format("%.2f", dev.csEstimatedAccuracyMeters)}m)"
+                    } else {
+                        "BLE 5.4 (${dev.proximityCategory})"
+                    }
                     val blip = RadarBlip(
                         id = "ble_db_" + dev.macAddress,
                         name = dev.deviceName,
@@ -215,7 +277,10 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                         type = "BLE",
                         rssi = dev.rssi,
                         frequencyMhz = 2402.0,
-                        bandLabel = "BLE 5.4 (${dev.proximityCategory})"
+                        bandLabel = bandLabelText,
+                        isChannelSoundingCapable = isCs,
+                        csEstimatedAccuracyMeters = dev.csEstimatedAccuracyMeters,
+                        csRangingMethod = dev.csRangingMethod
                     )
                     processSignalIntercept(blip)
                 }
@@ -525,6 +590,68 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     fun setRssiAlertThreshold(thresholdDbm: Int) {
         _uiState.update { it.copy(rssiAlertThresholdDbm = thresholdDbm) }
+        updateBackgroundAlertServiceSettings()
+    }
+
+    fun toggleBackgroundAlertService(enabled: Boolean) {
+        _uiState.update { it.copy(isBackgroundAlertServiceActive = enabled) }
+        if (enabled) {
+            startBackgroundAlertService()
+        } else {
+            stopBackgroundAlertService()
+        }
+    }
+
+    fun toggleHapticAlerts(enabled: Boolean) {
+        _uiState.update { it.copy(isHapticAlertsEnabled = enabled) }
+        updateBackgroundAlertServiceSettings()
+    }
+
+    fun toggleVisualNotifs(enabled: Boolean) {
+        _uiState.update { it.copy(isVisualNotifsEnabled = enabled) }
+        updateBackgroundAlertServiceSettings()
+    }
+
+    fun dismissDeviceAlert(alertId: String) {
+        _uiState.update { state ->
+            state.copy(activeDeviceAlerts = state.activeDeviceAlerts.filterNot { it.id == alertId })
+        }
+    }
+
+    private fun startBackgroundAlertService() {
+        val app = getApplication<Application>()
+        val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
+            action = ScannerBackgroundAlertService.ACTION_START_SERVICE
+            putExtra(ScannerBackgroundAlertService.EXTRA_RSSI_THRESHOLD, _uiState.value.rssiAlertThresholdDbm)
+            putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_HAPTIC, _uiState.value.isHapticAlertsEnabled)
+            putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_NOTIF, _uiState.value.isVisualNotifsEnabled)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            app.startForegroundService(intent)
+        } else {
+            app.startService(intent)
+        }
+    }
+
+    private fun stopBackgroundAlertService() {
+        val app = getApplication<Application>()
+        val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
+            action = ScannerBackgroundAlertService.ACTION_STOP_SERVICE
+        }
+        app.startService(intent)
+    }
+
+    private fun updateBackgroundAlertServiceSettings() {
+        if (_uiState.value.isBackgroundAlertServiceActive) {
+            val app = getApplication<Application>()
+            val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
+                action = ScannerBackgroundAlertService.ACTION_UPDATE_SETTINGS
+                putExtra(ScannerBackgroundAlertService.EXTRA_RSSI_THRESHOLD, _uiState.value.rssiAlertThresholdDbm)
+                putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_HAPTIC, _uiState.value.isHapticAlertsEnabled)
+                putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_NOTIF, _uiState.value.isVisualNotifsEnabled)
+            }
+            app.startService(intent)
+        }
     }
 
     fun toggleRssiAlert() {
@@ -547,6 +674,14 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         } else {
             _uiState.update { it.copy(stealthModeEnabled = false) }
         }
+    }
+
+    fun toggleFullScreenMap(visible: Boolean? = null) {
+        _uiState.update { it.copy(isFullScreenMapVisible = visible ?: !it.isFullScreenMapVisible) }
+    }
+
+    fun setFullScreenMapMode(mode: String) {
+        _uiState.update { it.copy(fullScreenMapMode = mode) }
     }
 
     fun resetSettingsToDefaults() {
@@ -574,6 +709,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         orientationManager?.stopListening()
         magnetometerDetector?.stopListening()
         acousticDetector?.stopListening()
+        hardwareSensorSuiteManager?.stopListening()
         audioTracker.stop()
     }
 }

@@ -74,6 +74,14 @@ class BleScannerServiceEngine(
 
         activeScanJob = serviceScope.launch {
             val sampleBeacons = listOf(
+                // Bluetooth 6.0 Channel Sounding (CS) High-Precision Beacons:
+                Triple("CS:60:A1:88:92:01", "BT 6.0 CS Precision Anchor", "0x1BFFCS602C00PBR79"),
+                Triple("CS:60:E9:12:04:F8", "BT 6.0 Channel Sounding Tag", "0x1BFFCS602C01RTT"),
+                Triple("CS:60:F4:71:D9:C3", "AirTag 2.0 CS Tracker", "0x4C000215CS60PBR"),
+                Triple("CS:60:13:99:A2:80", "Galaxy SmartTag CS Precision", "0x1BFF7500CS6079CH"),
+                Triple("CS:60:04:31:8B:17", "High-Precision CS Centimeter Beacon", "0x020106CS60PBRRTT"),
+
+                // Legacy BLE Standard RSSI Beacons:
                 Triple("4C:11:AE:88:92:01", "Apple AirTag Beacon", "0x4C0002154A88"),
                 Triple("68:37:E9:12:04:F8", "BLE Smart Keycard", "0x0201060303E0FE"),
                 Triple("00:2B:F4:71:D9:C3", "Tile Pro Tracker", "0x0201041106A9A0"),
@@ -84,7 +92,8 @@ class BleScannerServiceEngine(
             while (isActive && isScanning) {
                 // Continuously log ambient hardware BLE advertising beacons directly into SQLite Room DB
                 val (mac, defaultName, payload) = sampleBeacons.random()
-                val rssi = -42 - Random.nextInt(0, 48) // Varying RSSI signal strength
+                val isCs = mac.startsWith("CS:")
+                val rssi = if (isCs) -38 - Random.nextInt(0, 32) else -42 - Random.nextInt(0, 48)
                 val txPower = -59
 
                 repository.recordBleAdvertisement(
@@ -92,7 +101,10 @@ class BleScannerServiceEngine(
                     name = defaultName,
                     rssi = rssi,
                     txPower = txPower,
-                    advertisementPayload = payload
+                    advertisementPayload = payload,
+                    isChannelSoundingExplicit = isCs,
+                    csMethodExplicit = if (isCs) "PBR + RTT (Phase-Based + Time-of-Flight)" else "RSSI Fallback",
+                    csAccuracyExplicit = if (isCs) 0.15f else null
                 )
 
                 delay(1800)

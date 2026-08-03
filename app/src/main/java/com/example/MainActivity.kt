@@ -401,6 +401,78 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     }
                 }
 
+                // Device Signal Threshold Match Live Alert Banner
+                uiState.activeDeviceAlerts.firstOrNull()?.let { alert ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .testTag("device_threshold_alert_banner"),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF230B12),
+                        border = BorderStroke(1.dp, Color(0xFFFF2A55).copy(alpha = 0.8f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFFF2A55).copy(alpha = 0.2f),
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = "Device Alert",
+                                            tint = Color(0xFFFF2A55),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    Text(
+                                        text = "NEW TARGET MATCHED SIGNAL THRESHOLD (${alert.rssi} dBm)",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = Color(0xFFFF2A55)
+                                    )
+                                    Text(
+                                        text = "${alert.deviceName} • [${alert.macAddress}]",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "Est. Range: %.1fm • Cutoff: ${uiState.rssiAlertThresholdDbm} dBm".format(alert.distanceMeters),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = Color.LightGray
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { viewModel.dismissDeviceAlert(alert.id) },
+                                modifier = Modifier.size(28.dp).testTag("dismiss_device_alert_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss Alert",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Box(modifier = Modifier.weight(1f)) {
                     when (uiState.selectedTab) {
                         RadarTab.SWEEP_RADAR -> SweepRadarScreen(
@@ -416,6 +488,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onZoomOutMap = { viewModel.zoomOutMap() },
                             onSetMapRange = { viewModel.setMapRangeMeters(it) },
                             onToggleMaximizeMap = { viewModel.toggleMapMaximized() },
+                            onOpenFullScreenMap = { viewModel.toggleFullScreenMap(true) },
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
                             onPlayTestPing = { viewModel.playTestAudioPing(it) }
                         )
@@ -469,10 +542,26 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onTogglePerimeterAlarm = { viewModel.togglePerimeterAlarm() },
                             onToggleAudioSonar = { viewModel.toggleAudioSonar() },
                             onToggleBleScannerService = { viewModel.toggleBleScannerService() },
+                            onToggleBackgroundAlertService = { viewModel.toggleBackgroundAlertService(it) },
+                            onToggleHapticAlerts = { viewModel.toggleHapticAlerts(it) },
+                            onToggleVisualNotifs = { viewModel.toggleVisualNotifs(it) },
                             onResetDefaults = { viewModel.resetSettingsToDefaults() }
                         )
                     }
                 }
+            }
+
+            if (uiState.isFullScreenMapVisible) {
+                FullScreenRadarMapOverlay(
+                    uiState = uiState,
+                    onDismiss = { viewModel.toggleFullScreenMap(false) },
+                    onZoomIn = { viewModel.zoomInMap() },
+                    onZoomOut = { viewModel.zoomOutMap() },
+                    onSetMapRange = { viewModel.setMapRangeMeters(it) },
+                    onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                    onToggleAudioSonar = { viewModel.toggleAudioSonar() },
+                    onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) }
+                )
             }
         }
     }
@@ -766,6 +855,7 @@ fun SweepRadarScreen(
     onZoomOutMap: () -> Unit = {},
     onSetMapRange: (Float) -> Unit = {},
     onToggleMaximizeMap: () -> Unit = {},
+    onOpenFullScreenMap: () -> Unit = {},
     onSelectTargetDevice: (String?) -> Unit = {},
     onPlayTestPing: (Double) -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
@@ -817,6 +907,7 @@ fun SweepRadarScreen(
                         onZoomOut = onZoomOutMap,
                         onSetMapRange = onSetMapRange,
                         onToggleMaximizeMap = onToggleMaximizeMap,
+                        onOpenFullScreenMap = onOpenFullScreenMap,
                         onSelectTargetDevice = onSelectTargetDevice
                     )
 
@@ -908,6 +999,7 @@ fun SweepRadarScreen(
                     onZoomOut = onZoomOutMap,
                     onSetMapRange = onSetMapRange,
                     onToggleMaximizeMap = onToggleMaximizeMap,
+                    onOpenFullScreenMap = onOpenFullScreenMap,
                     onSelectTargetDevice = onSelectTargetDevice
                 )
 
@@ -2435,6 +2527,311 @@ fun DetectedSensorsScreen(
                             }
                         }
                     }
+
+                    // Accelerometer / G-Force
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFFFFCC00).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "3-Axis Accelerometer",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFFFFCC00)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFCC00),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "%.2f G-Force".format(sensor.totalGForce),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFFCC00)
+                                )
+                                Text(
+                                    text = "X: %.1f | Y: %.1f | Z: %.1f m/s²".format(sensor.accelX, sensor.accelY, sensor.accelZ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = if (sensor.isMotionDetected) "MOTION DETECTED" else "STATIONARY MOUNT",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = if (sensor.isMotionDetected) Color(0xFFFF8800) else Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+
+                    // Gyroscope Rotational Speed
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "3-Axis Gyroscope",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFF00E5FF)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Equalizer,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "%.1f °/s Rotation".format(sensor.rotationalSpeedDegPerSec),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00E5FF)
+                                )
+                                Text(
+                                    text = "X: %.1f | Y: %.1f | Z: %.1f rad/s".format(sensor.gyroX, sensor.gyroY, sensor.gyroZ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Vibration: %.1f Hz".format(sensor.vibrationHz),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.Yellow
+                                )
+                            }
+                        }
+                    }
+
+                    // Barometer & Pressure Altitude
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFFFF8800).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Barometric Altimeter",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFFFF8800)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Map,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF8800),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "${sensor.pressureHpa.toInt()} hPa",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFFFF8800)
+                                )
+                                Text(
+                                    text = "Altitude: ${sensor.estimatedAltitudeMeters.toInt()} meters ASL",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Floor Pressure Delta: STABLE",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+
+                    // Ambient Light Lux Sensor
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color.Yellow.copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Ambient Light Lux",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color.Yellow
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Sensors,
+                                        contentDescription = null,
+                                        tint = Color.Yellow,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "${sensor.lightLux.toInt()} Lux",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.Yellow
+                                )
+                                Text(
+                                    text = sensor.lightCondition,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = if (sensor.isOpticalPulseDetected) "IR PULSE DETECTED!" else "Optical Flare Normal",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = if (sensor.isOpticalPulseDetected) Color(0xFFFF3366) else Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+
+                    // Step Counter & Pedestrian Dead Reckoning (PDR)
+                    item {
+                        val sensor = uiState.sensorSuite
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF0C1814),
+                            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                            modifier = Modifier.width(220.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "PDR Dead Reckoning",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color(0xFF00FF66)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.Radar,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00FF66),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "${sensor.stepCount} Steps",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00FF66)
+                                )
+                                Text(
+                                    text = "Estimated PDR: %.1f meters".format(sensor.pdrDistanceMeters),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                                Text(
+                                    text = "Pedestrian Inertial Nav",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00E5FF)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3419,6 +3816,9 @@ fun SettingsScreen(
     onTogglePerimeterAlarm: () -> Unit,
     onToggleAudioSonar: () -> Unit,
     onToggleBleScannerService: () -> Unit,
+    onToggleBackgroundAlertService: (Boolean) -> Unit = {},
+    onToggleHapticAlerts: (Boolean) -> Unit = {},
+    onToggleVisualNotifs: (Boolean) -> Unit = {},
     onResetDefaults: () -> Unit
 ) {
     LazyColumn(
@@ -4081,6 +4481,111 @@ fun SettingsScreen(
                                 ),
                                 modifier = Modifier.testTag("rssi_alert_switch")
                             )
+                        }
+
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                            thickness = 1.dp
+                        )
+
+                        // Background Service & Haptic / Notification Triggers
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "BACKGROUND ALERT SERVICE",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Continuously checks scanned devices in background against signal cutoff threshold (${uiState.rssiAlertThresholdDbm} dBm)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = uiState.isBackgroundAlertServiceActive,
+                                    onCheckedChange = { onToggleBackgroundAlertService(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                    modifier = Modifier.testTag("bg_alert_service_switch")
+                                )
+                            }
+
+                            // Haptic Feedback Trigger Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Vibration,
+                                        contentDescription = "Haptics",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Haptic Feedback Pulse Alert",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Switch(
+                                    checked = uiState.isHapticAlertsEnabled,
+                                    onCheckedChange = { onToggleHapticAlerts(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                    modifier = Modifier.testTag("haptic_alerts_switch")
+                                )
+                            }
+
+                            // Visual System Notification Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Sensors,
+                                        contentDescription = "Notifications",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Visual System Notifications",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Switch(
+                                    checked = uiState.isVisualNotifsEnabled,
+                                    onCheckedChange = { onToggleVisualNotifs(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                    modifier = Modifier.testTag("visual_notifs_switch")
+                                )
+                            }
                         }
                     }
 
