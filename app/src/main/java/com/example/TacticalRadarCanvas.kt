@@ -6,13 +6,26 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.TrackChanges
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -22,8 +35,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -33,7 +50,15 @@ fun TacticalRadarCanvas(
     headingDegrees: Float,
     blips: List<RadarBlip>,
     nearestBlipId: String?,
+    selectedTargetDeviceId: String? = null,
     perimeterThresholdMeters: Float,
+    mapRangeMeters: Float = 30.0f,
+    isMapMaximized: Boolean = false,
+    onZoomIn: () -> Unit = {},
+    onZoomOut: () -> Unit = {},
+    onSetMapRange: (Float) -> Unit = {},
+    onToggleMaximizeMap: () -> Unit = {},
+    onSelectTargetDevice: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Infinite transition for continuous 360 radar sweep line animation
@@ -42,29 +67,29 @@ fun TacticalRadarCanvas(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3000, easing = LinearEasing),
+            animation = tween(durationMillis = 2800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "SweepAngle"
     )
 
-    // Pulse animation for perimeter breach warnings
+    // Pulse animation for perimeter breach warnings & target locking reticle
     val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.3f,
+        initialValue = 0.85f,
+        targetValue = 1.35f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            animation = tween(durationMillis = 900, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "PulseScale"
     )
 
-    // Pre-allocated Paint and Path objects to avoid GC frame drops
+    // Pre-allocated Paint and Path objects
     val arrowPath = remember { Path() }
     val textPaint = remember {
         android.graphics.Paint().apply {
             color = android.graphics.Color.parseColor("#00FF66")
-            textSize = 28f
+            textSize = 26f
             isAntiAlias = true
             typeface = android.graphics.Typeface.MONOSPACE
             textAlign = android.graphics.Paint.Align.CENTER
@@ -74,7 +99,7 @@ fun TacticalRadarCanvas(
     val warningTextPaint = remember {
         android.graphics.Paint().apply {
             color = android.graphics.Color.parseColor("#FF3366")
-            textSize = 24f
+            textSize = 22f
             isAntiAlias = true
             typeface = android.graphics.Typeface.MONOSPACE
             textAlign = android.graphics.Paint.Align.CENTER
@@ -90,6 +115,16 @@ fun TacticalRadarCanvas(
         }
     }
 
+    val targetTextPaint = remember {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.parseColor("#FFCC00")
+            textSize = 22f
+            isAntiAlias = true
+            typeface = android.graphics.Typeface.MONOSPACE
+            android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
+
     val radarGreen = Color(0xFF00FF66)
     val gridDark = Color(0xFF00FF66).copy(alpha = 0.25f)
     val breachRed = Color(0xFFFF3366)
@@ -98,161 +133,365 @@ fun TacticalRadarCanvas(
     val bleCyan = Color(0xFF00E5FF)
     val audioYellow = Color(0xFFFFCC00)
 
-    Canvas(
+    Box(
         modifier = modifier
-            .fillMaxSize()
-            .testTag("tactical_radar_canvas")
+            .fillMaxWidth()
+            .height(if (isMapMaximized) 480.dp else 320.dp)
+            .testTag("tactical_radar_container")
     ) {
-        val centerX = size.width / 2f
-        val centerY = size.height / 2f
-        val maxRadius = min(centerX, centerY) - 40f
-        val maxDistanceRange = 30f // 30 meters scaling
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("tactical_radar_canvas")
+                .pointerInput(mapRangeMeters) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom > 1.05f) {
+                            onZoomIn()
+                        } else if (zoom < 0.95f) {
+                            onZoomOut()
+                        }
+                    }
+                }
+        ) {
+            val centerX = size.width / 2f
+            val centerY = size.height / 2f
+            val maxRadius = min(centerX, centerY) - 44f
+            val maxDistanceRange = mapRangeMeters.coerceAtLeast(2.0f)
 
-        // 1. Draw Outer Bezel & Rotating Compass Grid locked to heading
-        rotate(-headingDegrees, pivot = Offset(centerX, centerY)) {
-            // Concentric Range Rings (50m, 30m, 15m, 5m perimeter, 1.5m)
-            drawCircle(color = radarGreen, radius = maxRadius, style = Stroke(width = 3f))
-            drawCircle(color = gridDark, radius = maxRadius * 0.75f, style = Stroke(width = 1.5f))
-            drawCircle(color = gridDark, radius = maxRadius * 0.50f, style = Stroke(width = 1.5f))
+            // 1. Outer Bezel & Rotating Compass Grid locked to heading
+            rotate(-headingDegrees, pivot = Offset(centerX, centerY)) {
+                // Concentric Range Rings (100%, 75%, 50%, 25%)
+                drawCircle(color = radarGreen, radius = maxRadius, style = Stroke(width = 3f))
+                drawCircle(color = gridDark, radius = maxRadius * 0.75f, style = Stroke(width = 1.5f))
+                drawCircle(color = gridDark, radius = maxRadius * 0.50f, style = Stroke(width = 1.5f))
+                drawCircle(color = gridDark, radius = maxRadius * 0.25f, style = Stroke(width = 1.5f))
 
-            // Micro-Perimeter Danger Ring (5m threshold proportional to maxDistanceRange)
-            val perimeterRadius = (perimeterThresholdMeters / maxDistanceRange) * maxRadius
-            drawCircle(
-                color = breachRed.copy(alpha = 0.7f),
-                radius = perimeterRadius.coerceAtMost(maxRadius),
-                style = Stroke(width = 2.5f)
-            )
+                // Micro-Perimeter Danger Ring
+                val perimeterRadius = (perimeterThresholdMeters / maxDistanceRange) * maxRadius
+                if (perimeterRadius <= maxRadius) {
+                    drawCircle(
+                        color = breachRed.copy(alpha = 0.8f),
+                        radius = perimeterRadius,
+                        style = Stroke(width = 2.5f)
+                    )
+                }
 
-            drawCircle(color = gridDark, radius = maxRadius * 0.10f, style = Stroke(width = 1.5f))
-
-            // Crosshair lines
-            drawLine(
-                color = gridDark,
-                start = Offset(centerX, centerY - maxRadius),
-                end = Offset(centerX, centerY + maxRadius),
-                strokeWidth = 1.5f
-            )
-            drawLine(
-                color = gridDark,
-                start = Offset(centerX - maxRadius, centerY),
-                end = Offset(centerX + maxRadius, centerY),
-                strokeWidth = 1.5f
-            )
-
-            // Compass Cardinal Direction Labels (N, E, S, W)
-            drawContext.canvas.nativeCanvas.drawText("N", centerX, centerY - maxRadius - 12f, textPaint)
-            drawContext.canvas.nativeCanvas.drawText("S", centerX, centerY + maxRadius + 30f, textPaint)
-            drawContext.canvas.nativeCanvas.drawText("E", centerX + maxRadius + 24f, centerY + 8f, textPaint)
-            drawContext.canvas.nativeCanvas.drawText("W", centerX - maxRadius - 24f, centerY + 8f, textPaint)
-
-            // Distance ring labels
-            drawContext.canvas.nativeCanvas.drawText("${perimeterThresholdMeters.toInt()}m PERIMETER", centerX, centerY - perimeterRadius - 6f, warningTextPaint)
-            drawContext.canvas.nativeCanvas.drawText("30m", centerX, centerY - maxRadius + 22f, textPaint)
-        }
-
-        // 2. Static Top Pointer Arrow for Device Heading
-        arrowPath.reset()
-        arrowPath.moveTo(centerX, centerY - maxRadius - 8f)
-        arrowPath.lineTo(centerX - 12f, centerY - maxRadius + 16f)
-        arrowPath.lineTo(centerX + 12f, centerY - maxRadius + 16f)
-        arrowPath.close()
-        drawPath(arrowPath, color = Color.Cyan)
-
-        // 3. Sweeping Radar Arc & Line
-        rotate(sweepAngle, pivot = Offset(centerX, centerY)) {
-            val sweepRad = Math.toRadians(0.0)
-            val sweepEndX = centerX + (maxRadius * sin(sweepRad)).toFloat()
-            val sweepEndY = centerY - (maxRadius * cos(sweepRad)).toFloat()
-
-            drawLine(
-                color = radarGreen,
-                start = Offset(centerX, centerY),
-                end = Offset(sweepEndX, sweepEndY),
-                strokeWidth = 3f,
-                cap = StrokeCap.Round
-            )
-
-            // Fading sweep sector gradient
-            drawArc(
-                brush = Brush.sweepGradient(
-                    0.0f to Color.Transparent,
-                    0.85f to Color.Transparent,
-                    1.0f to radarGreen.copy(alpha = 0.25f),
-                    center = Offset(centerX, centerY)
-                ),
-                startAngle = -90f,
-                sweepAngle = 60f,
-                useCenter = true,
-                topLeft = Offset(centerX - maxRadius, centerY - maxRadius),
-                size = Size(maxRadius * 2, maxRadius * 2)
-            )
-        }
-
-        // 4. Render Discovered Signal Blips
-        for (blip in blips) {
-            val radius = (blip.distance / maxDistanceRange) * maxRadius
-            val cappedRadius = radius.coerceAtMost(maxRadius)
-            val trueAngleRad = Math.toRadians((blip.targetAngleOffset - headingDegrees).toDouble())
-
-            val blipX = centerX + (cappedRadius * sin(trueAngleRad)).toFloat()
-            val blipY = centerY - (cappedRadius * cos(trueAngleRad)).toFloat()
-
-            val nodeColor = when (blip.type.uppercase()) {
-                "WIFI" -> wifiGreen
-                "CELLULAR" -> cellRed
-                "BLE" -> bleCyan
-                "MAGNETIC" -> Color(0xFFFF00FF)
-                else -> audioYellow
-            }
-
-            val isBreach = blip.distance < perimeterThresholdMeters
-
-            // If inside perimeter, draw animated pulsing warning ring
-            if (isBreach) {
-                drawCircle(
-                    color = breachRed.copy(alpha = 0.5f),
-                    radius = 20f * pulseScale,
-                    center = Offset(blipX, blipY),
-                    style = Stroke(width = 2f)
-                )
-            }
-
-            // Target Blip Dot
-            drawCircle(
-                color = nodeColor,
-                radius = if (blip.id == nearestBlipId) 12f else 9f,
-                center = Offset(blipX, blipY)
-            )
-
-            // Target Lock Crosshair if nearest target
-            if (blip.id == nearestBlipId) {
-                drawCircle(
-                    color = Color.Yellow,
-                    radius = 22f,
-                    center = Offset(blipX, blipY),
-                    style = Stroke(width = 2.5f)
-                )
+                // Crosshair lines
                 drawLine(
-                    color = Color.Yellow,
-                    start = Offset(blipX - 28f, blipY),
-                    end = Offset(blipX + 28f, blipY),
+                    color = gridDark,
+                    start = Offset(centerX, centerY - maxRadius),
+                    end = Offset(centerX, centerY + maxRadius),
                     strokeWidth = 1.5f
                 )
                 drawLine(
-                    color = Color.Yellow,
-                    start = Offset(blipX, blipY - 28f),
-                    end = Offset(blipX, blipY + 28f),
+                    color = gridDark,
+                    start = Offset(centerX - maxRadius, centerY),
+                    end = Offset(centerX + maxRadius, centerY),
                     strokeWidth = 1.5f
+                )
+
+                // Compass Cardinal Direction Labels (N, E, S, W)
+                drawContext.canvas.nativeCanvas.drawText("N", centerX, centerY - maxRadius - 12f, textPaint)
+                drawContext.canvas.nativeCanvas.drawText("S", centerX, centerY + maxRadius + 30f, textPaint)
+                drawContext.canvas.nativeCanvas.drawText("E", centerX + maxRadius + 24f, centerY + 8f, textPaint)
+                drawContext.canvas.nativeCanvas.drawText("W", centerX - maxRadius - 24f, centerY + 8f, textPaint)
+
+                // Range ring labels
+                if (perimeterRadius <= maxRadius - 20f) {
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "${perimeterThresholdMeters.toInt()}m BREACH",
+                        centerX,
+                        centerY - perimeterRadius - 6f,
+                        warningTextPaint
+                    )
+                }
+                drawContext.canvas.nativeCanvas.drawText(
+                    "${maxDistanceRange.toInt()}m",
+                    centerX,
+                    centerY - maxRadius + 22f,
+                    textPaint
+                )
+                drawContext.canvas.nativeCanvas.drawText(
+                    "${(maxDistanceRange * 0.5f).toInt()}m",
+                    centerX,
+                    centerY - (maxRadius * 0.5f) + 18f,
+                    textPaint
                 )
             }
 
-            // Blip Name & Distance Tag
-            drawContext.canvas.nativeCanvas.drawText(
-                "${blip.name.take(12)} (${String.format("%.1f", blip.distance)}m)",
-                blipX + 14f,
-                blipY + 6f,
-                blipTextPaint
-            )
+            // 2. Heading Pointer Arrow
+            arrowPath.reset()
+            arrowPath.moveTo(centerX, centerY - maxRadius - 8f)
+            arrowPath.lineTo(centerX - 12f, centerY - maxRadius + 16f)
+            arrowPath.lineTo(centerX + 12f, centerY - maxRadius + 16f)
+            arrowPath.close()
+            drawPath(arrowPath, color = Color.Cyan)
+
+            // 3. Sweeping Radar Arc & Line
+            rotate(sweepAngle, pivot = Offset(centerX, centerY)) {
+                val sweepRad = Math.toRadians(0.0)
+                val sweepEndX = centerX + (maxRadius * sin(sweepRad)).toFloat()
+                val sweepEndY = centerY - (maxRadius * cos(sweepRad)).toFloat()
+
+                drawLine(
+                    color = radarGreen,
+                    start = Offset(centerX, centerY),
+                    end = Offset(sweepEndX, sweepEndY),
+                    strokeWidth = 3f,
+                    cap = StrokeCap.Round
+                )
+
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        0.0f to Color.Transparent,
+                        0.85f to Color.Transparent,
+                        1.0f to radarGreen.copy(alpha = 0.28f),
+                        center = Offset(centerX, centerY)
+                    ),
+                    startAngle = -90f,
+                    sweepAngle = 60f,
+                    useCenter = true,
+                    topLeft = Offset(centerX - maxRadius, centerY - maxRadius),
+                    size = Size(maxRadius * 2, maxRadius * 2)
+                )
+            }
+
+            // 4. Render Discovered Signal Blips & Target Locking Vector
+            for (blip in blips) {
+                val radius = (blip.distance / maxDistanceRange) * maxRadius
+                val cappedRadius = radius.coerceAtMost(maxRadius)
+                val trueAngleRad = Math.toRadians((blip.targetAngleOffset - headingDegrees).toDouble())
+
+                val blipX = centerX + (cappedRadius * sin(trueAngleRad)).toFloat()
+                val blipY = centerY - (cappedRadius * cos(trueAngleRad)).toFloat()
+
+                val isSelectedTarget = selectedTargetDeviceId != null &&
+                        (blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId)
+                val isNearestTarget = selectedTargetDeviceId == null && blip.id == nearestBlipId
+
+                val nodeColor = when (blip.type.uppercase()) {
+                    "WIFI" -> wifiGreen
+                    "CELLULAR" -> cellRed
+                    "BLE" -> bleCyan
+                    "MAGNETIC" -> Color(0xFFFF00FF)
+                    else -> audioYellow
+                }
+
+                val isBreach = blip.distance < perimeterThresholdMeters
+
+                // Breach warning pulse ring
+                if (isBreach) {
+                    drawCircle(
+                        color = breachRed.copy(alpha = 0.6f),
+                        radius = 22f * pulseScale,
+                        center = Offset(blipX, blipY),
+                        style = Stroke(width = 2f)
+                    )
+                }
+
+                // Target Lock Vector Line from origin (user center) to selected device
+                if (isSelectedTarget) {
+                    drawLine(
+                        color = Color.Yellow,
+                        start = Offset(centerX, centerY),
+                        end = Offset(blipX, blipY),
+                        strokeWidth = 2.5f,
+                        cap = StrokeCap.Round
+                    )
+
+                    // Target Reticle Box / Circle
+                    drawCircle(
+                        color = Color.Yellow,
+                        radius = 26f * pulseScale,
+                        center = Offset(blipX, blipY),
+                        style = Stroke(width = 2f)
+                    )
+                    drawCircle(
+                        color = Color.Yellow,
+                        radius = 16f,
+                        center = Offset(blipX, blipY),
+                        style = Stroke(width = 2.5f)
+                    )
+
+                    // Reticle Crosshair
+                    drawLine(
+                        color = Color.Yellow,
+                        start = Offset(blipX - 32f, blipY),
+                        end = Offset(blipX + 32f, blipY),
+                        strokeWidth = 2f
+                    )
+                    drawLine(
+                        color = Color.Yellow,
+                        start = Offset(blipX, blipY - 32f),
+                        end = Offset(blipX, blipY + 32f),
+                        strokeWidth = 2f
+                    )
+
+                    // Locked Target Label Callout
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "LOCKED TARGET: ${blip.name} (%.1fm)".format(blip.distance),
+                        blipX + 18f,
+                        blipY - 10f,
+                        targetTextPaint
+                    )
+                } else if (isNearestTarget) {
+                    drawCircle(
+                        color = Color.Yellow.copy(alpha = 0.8f),
+                        radius = 20f,
+                        center = Offset(blipX, blipY),
+                        style = Stroke(width = 2f)
+                    )
+                }
+
+                // Blip Dot
+                drawCircle(
+                    color = if (isSelectedTarget) Color.Yellow else nodeColor,
+                    radius = if (isSelectedTarget || isNearestTarget) 11f else 8f,
+                    center = Offset(blipX, blipY)
+                )
+
+                // Name tag
+                if (!isSelectedTarget) {
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "${blip.name.take(12)} (%.1fm)".format(blip.distance),
+                        blipX + 14f,
+                        blipY + 6f,
+                        blipTextPaint
+                    )
+                }
+            }
+        }
+
+        // Overlay Controls Top Right: Zoom In, Zoom Out, Expand Map
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clickable { onZoomIn() }
+                    .testTag("radar_zoom_in_button")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Zoom In",
+                        tint = Color(0xFF00FF66),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clickable { onZoomOut() }
+                    .testTag("radar_zoom_out_button")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Zoom Out",
+                        tint = Color(0xFF00FF66),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .size(36.dp)
+                    .clickable { onToggleMaximizeMap() }
+                    .testTag("radar_expand_map_button")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isMapMaximized) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = "Resize Map View",
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        // Overlay Range Presets Chips Top Left
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf(5f, 15f, 30f, 60f).forEach { rangePreset ->
+                val isSelected = mapRangeMeters.toInt() == rangePreset.toInt()
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isSelected) Color(0xFF00FF66) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .clickable { onSetMapRange(rangePreset) }
+                        .testTag("range_chip_${rangePreset.toInt()}m")
+                ) {
+                    Text(
+                        text = "${rangePreset.toInt()}m",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (isSelected) Color.Black else Color(0xFF00FF66),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
+        // Target Lock Info Status Banner Bottom Center
+        if (selectedTargetDeviceId != null) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF141A06),
+                border = BorderStroke(1.dp, Color.Yellow),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 10.dp)
+                    .clickable { onSelectTargetDevice(null) }
+                    .testTag("target_lock_active_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TrackChanges,
+                        contentDescription = "Target Lock",
+                        tint = Color.Yellow,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "AUDIO SONAR LOCKED TO DEVICE • CLICK TO UNLOCK",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        ),
+                        color = Color.Yellow
+                    )
+                }
+            }
         }
     }
 }

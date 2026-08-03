@@ -411,7 +411,13 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onFilterSelected = { viewModel.setFilterType(it) },
                             onToggleBleScanner = { viewModel.toggleBleScannerService() },
                             onClearBleDb = { viewModel.clearBleDatabaseLogs() },
-                            onDeleteBleDevice = { viewModel.deleteBleDeviceFromDb(it) }
+                            onDeleteBleDevice = { viewModel.deleteBleDeviceFromDb(it) },
+                            onZoomInMap = { viewModel.zoomInMap() },
+                            onZoomOutMap = { viewModel.zoomOutMap() },
+                            onSetMapRange = { viewModel.setMapRangeMeters(it) },
+                            onToggleMaximizeMap = { viewModel.toggleMapMaximized() },
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onPlayTestPing = { viewModel.playTestAudioPing(it) }
                         )
 
                         RadarTab.SPECTRUM_ANALYZER -> SpectrumAnalyzerScreen(
@@ -756,6 +762,12 @@ fun SweepRadarScreen(
     onToggleBleScanner: () -> Unit,
     onClearBleDb: () -> Unit,
     onDeleteBleDevice: (String) -> Unit,
+    onZoomInMap: () -> Unit = {},
+    onZoomOutMap: () -> Unit = {},
+    onSetMapRange: (Float) -> Unit = {},
+    onToggleMaximizeMap: () -> Unit = {},
+    onSelectTargetDevice: (String?) -> Unit = {},
+    onPlayTestPing: (Double) -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -797,7 +809,15 @@ fun SweepRadarScreen(
                         headingDegrees = uiState.headingDegrees,
                         blips = filteredBlips,
                         nearestBlipId = uiState.nearestBlip?.id,
-                        perimeterThresholdMeters = uiState.perimeterThresholdMeters
+                        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+                        mapRangeMeters = uiState.mapRangeMeters,
+                        isMapMaximized = uiState.isMapMaximized,
+                        onZoomIn = onZoomInMap,
+                        onZoomOut = onZoomOutMap,
+                        onSetMapRange = onSetMapRange,
+                        onToggleMaximizeMap = onToggleMaximizeMap,
+                        onSelectTargetDevice = onSelectTargetDevice
                     )
 
                     Surface(
@@ -839,9 +859,13 @@ fun SweepRadarScreen(
                 BleDatabaseTrackerCard(
                     bleDevices = uiState.savedBleDevices,
                     isScannerActive = uiState.isBleScannerServiceActive,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    isAudioSonarActive = uiState.isAudioSonarActive,
                     onToggleScanner = onToggleBleScanner,
                     onClearDatabase = onClearBleDb,
-                    onDeleteDevice = onDeleteBleDevice
+                    onDeleteDevice = onDeleteBleDevice,
+                    onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
+                    onPlayTestPing = onPlayTestPing
                 )
             }
         }
@@ -862,7 +886,7 @@ fun SweepRadarScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(340.dp)
+                    .height(if (uiState.isMapMaximized) 480.dp else 340.dp)
                     .background(Color(0xFF08120E), RoundedCornerShape(20.dp))
                     .border(
                         1.dp,
@@ -876,7 +900,15 @@ fun SweepRadarScreen(
                     headingDegrees = uiState.headingDegrees,
                     blips = filteredBlips,
                     nearestBlipId = uiState.nearestBlip?.id,
-                    perimeterThresholdMeters = uiState.perimeterThresholdMeters
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+                    mapRangeMeters = uiState.mapRangeMeters,
+                    isMapMaximized = uiState.isMapMaximized,
+                    onZoomIn = onZoomInMap,
+                    onZoomOut = onZoomOutMap,
+                    onSetMapRange = onSetMapRange,
+                    onToggleMaximizeMap = onToggleMaximizeMap,
+                    onSelectTargetDevice = onSelectTargetDevice
                 )
 
                 Surface(
@@ -909,9 +941,13 @@ fun SweepRadarScreen(
             BleDatabaseTrackerCard(
                 bleDevices = uiState.savedBleDevices,
                 isScannerActive = uiState.isBleScannerServiceActive,
+                selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                isAudioSonarActive = uiState.isAudioSonarActive,
                 onToggleScanner = onToggleBleScanner,
                 onClearDatabase = onClearBleDb,
-                onDeleteDevice = onDeleteBleDevice
+                onDeleteDevice = onDeleteBleDevice,
+                onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
+                onPlayTestPing = onPlayTestPing
             )
         }
     }
@@ -3620,7 +3656,6 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                                 color = Color.Gray
                             )
-                            Spacer(modifier = Modifier.weight(1f))
                             OutlinedButton(
                                 onClick = { onAdjustPerimeterThreshold(-0.5f) },
                                 shape = RoundedCornerShape(8.dp),
@@ -3723,7 +3758,6 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                                 color = Color.Gray
                             )
-                            Spacer(modifier = Modifier.weight(1f))
                             OutlinedButton(
                                 onClick = { onAdjustWarningZoneThreshold(-1.0f) },
                                 shape = RoundedCornerShape(8.dp),
@@ -3819,9 +3853,7 @@ fun SettingsScreen(
                                         if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                     ),
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("haptic_cadence_$pulseMs")
+                                    modifier = Modifier.testTag("haptic_cadence_$pulseMs")
                                 ) {
                                     Text(
                                         text = label,

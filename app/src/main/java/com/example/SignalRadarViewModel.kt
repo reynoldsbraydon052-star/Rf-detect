@@ -122,7 +122,11 @@ data class SignalRadarUiState(
     val isRssiAlertEnabled: Boolean = true,
     val emfAlertThresholdMicroTesla: Float = 50.0f, // 10 to 200 µT
     val acousticAlertThresholdDb: Int = -50, // -80 to -10 dB
-    val stealthModeEnabled: Boolean = false
+    val stealthModeEnabled: Boolean = false,
+    // Interactive Map & Proximity Sonar State:
+    val mapRangeMeters: Float = 30.0f,
+    val selectedTargetDeviceId: String? = null,
+    val isMapMaximized: Boolean = false
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -327,7 +331,14 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val blipsList = blipMap.values.toList()
         val nearest = blipsList.minByOrNull { it.distance }
 
-        nearest?.let {
+        val targetDeviceId = _uiState.value.selectedTargetDeviceId
+        val targetBlip = if (targetDeviceId != null) {
+            blipsList.find { it.id == targetDeviceId || it.name == targetDeviceId } ?: nearest
+        } else {
+            nearest
+        }
+
+        targetBlip?.let {
             if (_uiState.value.isAudioSonarActive) {
                 audioTracker.updateProximityDistance(it.distance.toDouble())
             }
@@ -342,6 +353,39 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 perimeterBreachCount = breaches
             )
         }
+    }
+
+    fun setMapRangeMeters(meters: Float) {
+        _uiState.update { it.copy(mapRangeMeters = meters.coerceIn(2.0f, 100.0f)) }
+    }
+
+    fun zoomInMap() {
+        _uiState.update { it.copy(mapRangeMeters = (it.mapRangeMeters * 0.7f).coerceIn(2.0f, 100.0f)) }
+    }
+
+    fun zoomOutMap() {
+        _uiState.update { it.copy(mapRangeMeters = (it.mapRangeMeters * 1.4f).coerceIn(2.0f, 100.0f)) }
+    }
+
+    fun toggleMapMaximized() {
+        _uiState.update { it.copy(isMapMaximized = !it.isMapMaximized) }
+    }
+
+    fun selectTargetDevice(deviceId: String?) {
+        _uiState.update { state ->
+            val newTarget = if (state.selectedTargetDeviceId == deviceId) null else deviceId
+            state.copy(selectedTargetDeviceId = newTarget)
+        }
+        if (deviceId != null && !_uiState.value.isAudioSonarActive && !_uiState.value.stealthModeEnabled) {
+            if (!audioTracker.isAudioActive()) {
+                audioTracker.start()
+                _uiState.update { it.copy(isAudioSonarActive = true) }
+            }
+        }
+    }
+
+    fun playTestAudioPing(distanceMeters: Double) {
+        audioTracker.playSingleTestPing(distanceMeters)
     }
 
     fun setTab(tab: RadarTab) {

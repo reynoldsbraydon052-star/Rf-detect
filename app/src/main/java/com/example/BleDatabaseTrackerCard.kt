@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.TrackChanges
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,9 +37,13 @@ import java.util.Locale
 fun BleDatabaseTrackerCard(
     bleDevices: List<BleDeviceEntity>,
     isScannerActive: Boolean,
+    selectedTargetDeviceId: String? = null,
+    isAudioSonarActive: Boolean = false,
     onToggleScanner: () -> Unit,
     onClearDatabase: () -> Unit,
     onDeleteDevice: (String) -> Unit,
+    onSelectTargetDevice: (String) -> Unit = {},
+    onPlayTestPing: (Double) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -263,6 +269,10 @@ fun BleDatabaseTrackerCard(
                     filteredDevices.forEach { device ->
                         BleDeviceRoomTile(
                             device = device,
+                            isSelectedTarget = selectedTargetDeviceId == device.macAddress || selectedTargetDeviceId == device.deviceName,
+                            isAudioSonarActive = isAudioSonarActive,
+                            onToggleAudioLock = { onSelectTargetDevice(device.macAddress) },
+                            onPlayTestPing = { onPlayTestPing(device.distanceMeters.toDouble()) },
                             onDelete = { onDeleteDevice(device.macAddress) }
                         )
                     }
@@ -275,6 +285,10 @@ fun BleDatabaseTrackerCard(
 @Composable
 fun BleDeviceRoomTile(
     device: BleDeviceEntity,
+    isSelectedTarget: Boolean = false,
+    isAudioSonarActive: Boolean = false,
+    onToggleAudioLock: () -> Unit = {},
+    onPlayTestPing: () -> Unit = {},
     onDelete: () -> Unit
 ) {
     val proximityColor = when (device.proximityCategory) {
@@ -290,15 +304,18 @@ fun BleDeviceRoomTile(
 
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF080E0B),
-        border = BorderStroke(1.dp, proximityColor.copy(alpha = 0.4f)),
+        color = if (isSelectedTarget) Color(0xFF141F0A) else Color(0xFF080E0B),
+        border = BorderStroke(
+            if (isSelectedTarget) 2.dp else 1.dp,
+            if (isSelectedTarget) Color.Yellow else proximityColor.copy(alpha = 0.4f)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("ble_device_tile_${device.macAddress}")
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -316,14 +333,36 @@ fun BleDeviceRoomTile(
                             .background(proximityColor)
                     )
                     Column {
-                        Text(
-                            text = device.deviceName,
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = Color.White
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = device.deviceName,
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.White
+                            )
+                            if (isSelectedTarget) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color.Yellow
+                                ) {
+                                    Text(
+                                        text = "TARGET LOCKED",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = Color.Black,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = "MAC: ${device.macAddress}",
                             style = MaterialTheme.typography.labelSmall.copy(
@@ -392,6 +431,68 @@ fun BleDeviceRoomTile(
                     ),
                     color = Color.Yellow
                 )
+            }
+
+            // Proximity Audio Action Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onToggleAudioLock,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .testTag("lock_audio_sonar_${device.macAddress}"),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isSelectedTarget) Color.Yellow else Color(0xFF00FF66).copy(alpha = 0.18f),
+                        contentColor = if (isSelectedTarget) Color.Black else Color(0xFF00FF66)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TrackChanges,
+                        contentDescription = "Lock Audio Sonar",
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (isSelectedTarget) "AUDIO LOCKED" else "LOCK AUDIO SONAR",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onPlayTestPing,
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("ping_sonar_${device.macAddress}"),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00E5FF)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = "Test Ping",
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "PING TONE",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
             }
 
             // Meta Info
