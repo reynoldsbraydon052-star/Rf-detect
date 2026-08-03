@@ -538,25 +538,19 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
 
                         RadarTab.SETTINGS -> SettingsScreen(
                             uiState = uiState,
-                            onSetScanMode = { viewModel.setScanMode(it) },
-                            onSetRssiThreshold = { viewModel.setRssiAlertThreshold(it) },
-                            onToggleRssiAlert = { viewModel.toggleRssiAlert() },
-                            onSetPerimeterThreshold = { viewModel.setPerimeterThreshold(it) },
-                            onSetWarningZoneThreshold = { viewModel.setWarningZoneThreshold(it) },
-                            onSetPerimeterSensitivityPreset = { viewModel.setPerimeterSensitivityPreset(it) },
-                            onSetHapticPulseFrequency = { viewModel.setHapticPulseFrequency(it) },
-                            onAdjustPerimeterThreshold = { viewModel.adjustPerimeterThreshold(it) },
-                            onAdjustWarningZoneThreshold = { viewModel.adjustWarningZoneThreshold(it) },
+                            onBack = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
+                            onSetMapRange = { viewModel.updateMapRangeInStore(it) },
+                            onSetRssiThreshold = { viewModel.updateRssiThresholdInStore(it) },
                             onSetEmfThreshold = { viewModel.setEmfAlertThreshold(it) },
-                            onSetAcousticThreshold = { viewModel.setAcousticAlertThreshold(it) },
-                            onToggleStealthMode = { viewModel.toggleStealthMode() },
-                            onTogglePerimeterAlarm = { viewModel.togglePerimeterAlarm() },
-                            onToggleAudioSonar = { viewModel.toggleAudioSonar() },
-                            onToggleBleScannerService = { viewModel.toggleBleScannerService() },
-                            onToggleBackgroundAlertService = { viewModel.toggleBackgroundAlertService(it) },
+                            onSetBreachThreshold = { viewModel.updateBreachPerimeterInStore(it) },
+                            onToggleBackgroundRecon = { viewModel.toggleBackgroundAlertService(it) },
+                            onToggleSmoothingLerp = { viewModel.toggleSmoothingLerpInStore(it) },
                             onToggleHapticAlerts = { viewModel.toggleHapticAlerts(it) },
                             onToggleVisualNotifs = { viewModel.toggleVisualNotifs(it) },
-                            onResetDefaults = { viewModel.resetSettingsToDefaults() }
+                            onSetScanMode = { viewModel.setScanMode(it) },
+                            onExportLogsCsv = { viewModel.exportCapturedLogsCsv() },
+                            onExportKmlBreadcrumbs = { viewModel.exportGpsBreadcrumbsKml() },
+                            onPurgeHistory = { viewModel.purgeInterceptionHistory() }
                         )
                     }
                 }

@@ -143,6 +143,9 @@ data class SignalRadarUiState(
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val settingsDataStore = SettingsDataStore(application)
+    private val signalProvider = SignalProvider(application)
+
     private val bleDatabase = BleDatabase.getInstance(application)
     private val bleRepository = BleDeviceRepository(bleDatabase.bleDeviceDao())
     private val bleScannerService = BleScannerServiceEngine(application, bleRepository)
@@ -164,6 +167,43 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     val uiState: StateFlow<SignalRadarUiState> = _uiState.asStateFlow()
 
     init {
+        // Collect persistent settings from DataStore
+        viewModelScope.launch {
+            settingsDataStore.defaultRangeMeters.collect { range ->
+                _uiState.update { it.copy(mapRangeMeters = range.toFloat()) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.rssiCutoffDbm.collect { cutoff ->
+                _uiState.update { it.copy(rssiAlertThresholdDbm = cutoff) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.breachPerimeterMeters.collect { perimeter ->
+                _uiState.update { it.copy(perimeterThresholdMeters = perimeter.toFloat()) }
+            }
+        }
+
+        // Start Multi-Sensor Signal Provider Engine
+        signalProvider.startInterception()
+        viewModelScope.launch {
+            signalProvider.spectrumSnapshot.collect { snapshot ->
+                // Process Wi-Fi Metrics
+                snapshot.wifiMetrics.forEach { wifi ->
+                    val wifiBlip = RadarBlip(
+                        id = "wifi_" + wifi.bssid,
+                        name = wifi.ssid,
+                        distance = wifi.distanceRttMeters ?: (Math.pow(10.0, (27.55 - (20 * kotlin.math.log10(wifi.frequencyMhz.toDouble())) + kotlin.math.abs(wifi.rssiDbm)) / 20.0)).toFloat().coerceIn(1.0f, 40.0f),
+                        targetAngleOffset = (wifi.bssid.hashCode().run { kotlin.math.abs(this) % 360 }).toFloat(),
+                        type = "WIFI",
+                        rssi = wifi.rssiDbm,
+                        frequencyMhz = wifi.frequencyMhz.toDouble(),
+                        bandLabel = "${wifi.band} (BSSID ${wifi.bssid})"
+                    )
+                    processSignalIntercept(wifiBlip)
+                }
+            }
+        }
         // Setup orientation sensor fusion (Compass / Accelerometer)
         orientationManager = OrientationManager(application) { heading ->
             _uiState.update { it.copy(headingDegrees = heading) }
@@ -704,8 +744,49 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun updateMapRangeInStore(meters: Float) {
+        setMapRangeMeters(meters)
+        viewModelScope.launch {
+            settingsDataStore.updateDefaultRangeMeters(meters.toInt())
+        }
+    }
+
+    fun updateRssiThresholdInStore(thresholdDbm: Int) {
+        setRssiAlertThreshold(thresholdDbm)
+        viewModelScope.launch {
+            settingsDataStore.updateRssiCutoffDbm(thresholdDbm)
+        }
+    }
+
+    fun updateBreachPerimeterInStore(meters: Float) {
+        setPerimeterThreshold(meters)
+        viewModelScope.launch {
+            settingsDataStore.updateBreachPerimeterMeters(meters.toInt())
+        }
+    }
+
+    fun toggleSmoothingLerpInStore(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.updateEnableSmoothingLerp(enabled)
+        }
+    }
+
+    fun exportCapturedLogsCsv() {
+        historyLogger.logSignalEntry("EXPOSED_CSV_EXPORT_INITIATED", 0f, "SYSTEM", 0.0, false)
+    }
+
+    fun exportGpsBreadcrumbsKml() {
+        historyLogger.logSignalEntry("EXPOSED_KML_WARDRIVING_BREADCRUMBS_EXPORT", 0f, "GPS", 0.0, false)
+    }
+
+    fun purgeInterceptionHistory() {
+        clearLogHistory()
+        clearBleDatabaseLogs()
+    }
+
     override fun onCleared() {
         super.onCleared()
+        signalProvider.stopInterception()
         bleScannerService.stopScannerService()
         orientationManager?.stopListening()
         magnetometerDetector?.stopListening()

@@ -236,51 +236,151 @@ fun FullScreenRadarContent(
                 }
             }
 
-            // Map View Mode Selector Bar (Vector / Heatmap / Sat-Grid)
-            Row(
+            // Map View Mode Selector Bar & Precision Scale Controls
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF050B07))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(vertical = 4.dp)
             ) {
-                Text(
-                    text = "VIEW MODE:",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.5.sp
-                    ),
-                    color = Color.Gray
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "MODE:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color.Gray
+                        )
 
-                listOf(
-                    "TACTICAL" to "TACTICAL VECTOR",
-                    "HEATMAP" to "IR HEATMAP",
-                    "SAT_GRID" to "SAT GRID"
-                ).forEach { (modeKey, modeTitle) ->
-                    val isSel = uiState.fullScreenMapMode == modeKey
-                    FilterChip(
-                        selected = isSel,
-                        onClick = { onSetFullScreenMapMode(modeKey) },
-                        label = {
+                        listOf(
+                            "TACTICAL" to "VECTOR",
+                            "HEATMAP" to "HEATMAP",
+                            "WATERFALL" to "WATERFALL",
+                            "SAT_GRID" to "SAT GRID"
+                        ).forEach { (modeKey, modeTitle) ->
+                            val isSel = uiState.fullScreenMapMode == modeKey
+                            FilterChip(
+                                selected = isSel,
+                                onClick = { onSetFullScreenMapMode(modeKey) },
+                                label = {
+                                    Text(
+                                        modeTitle,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF00FF66),
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color(0xFF0C1F13),
+                                    labelColor = Color(0xFF00FF66)
+                                )
+                            )
+                        }
+                    }
+
+                    // Precision Scale Quick Buttons (10m, 25m, 50m, 100m)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "SCALE:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color.Gray
+                        )
+                        listOf(10f, 25f, 50f, 100f).forEach { scale ->
+                            val isCurrentScale = uiState.mapRangeMeters.toInt() == scale.toInt()
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isCurrentScale) Color(0xFF00E5FF) else Color(0xFF0F261B))
+                                    .clickable { onSetMapRange(scale) }
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "${scale.toInt()}m",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = if (isCurrentScale) Color.Black else Color(0xFF00E5FF)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Category Filter Bar (LazyRow)
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    item {
+                        Text(
+                            text = "CATEGORIES:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color.Gray
+                        )
+                    }
+
+                    val categories = listOf(
+                        "ALL" to "All Nodes",
+                        "BLE" to "📱 Mobile/Wear",
+                        "WIFI" to "📶 Wi-Fi APs",
+                        "CELLULAR" to "📡 Cellular",
+                        "MAGNETIC" to "🧲 EMF Anomaly",
+                        "AUDIO" to "🎙️ Ultrasonic/Audio"
+                    )
+
+                    items(categories.size) { idx ->
+                        val (catKey, catLabel) = categories[idx]
+                        val isSelected = uiState.selectedFilterType == catKey
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) Color(0xFF00FF66) else Color(0xFF0E2217))
+                                .clickable { onSetFullScreenMapMode(uiState.fullScreenMapMode) } // Active filter chip hook
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
                             Text(
-                                modeTitle,
+                                text = catLabel,
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
-                                )
+                                ),
+                                color = if (isSelected) Color.Black else Color(0xFF00FF66)
                             )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF00FF66),
-                            selectedLabelColor = Color.Black,
-                            containerColor = Color(0xFF0C1F13),
-                            labelColor = Color(0xFF00FF66)
-                        )
-                    )
+                        }
+                    }
                 }
             }
 
