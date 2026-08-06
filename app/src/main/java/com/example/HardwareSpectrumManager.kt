@@ -176,7 +176,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 count++
                 val freqMhz = res.frequency.toDouble()
                 val dist = FrequencyConverter.calculateDistance(res.level, freqMhz)
-                val angle = (res.BSSID.hashCode() % 360).toFloat()
+                val rawHash = kotlin.math.abs(res.BSSID.hashCode())
+                val angle = (rawHash * 137.5f) % 360f
                 val ssidName = if (res.SSID.isNotBlank()) res.SSID else "Hidden AP (${res.BSSID.takeLast(5)})"
                 val band = FrequencyConverter.getBandLabel(freqMhz)
 
@@ -213,7 +214,8 @@ class HardwareSpectrumManager(private val context: Context) {
                     val dbm = info.cellSignalStrength.dbm
                     val carrierName = OfflineCarrierDatabase.resolveCarrier(identity.mccString, identity.mncString)
                     val dist = FrequencyConverter.calculateDistance(dbm, freqMhz)
-                    val angle = (identity.ci % 360).toFloat()
+                    val rawHash = kotlin.math.abs(identity.ci)
+                    val angle = (rawHash * 137.5f) % 360f
 
                     _rfSignals.tryEmit(
                         RadarBlip(
@@ -246,7 +248,8 @@ class HardwareSpectrumManager(private val context: Context) {
                     val name = device.name ?: "BLE Sounder (${device.address.takeLast(5)})"
                     val rssi = result.rssi
                     val dist = FrequencyConverter.calculateDistance(rssi, 2402.0)
-                    val angle = (device.address.hashCode() % 360).toFloat()
+                    val rawHash = kotlin.math.abs(device.address.hashCode())
+                    val angle = (rawHash * 137.5f) % 360f
 
                     _rfSignals.tryEmit(
                         RadarBlip(

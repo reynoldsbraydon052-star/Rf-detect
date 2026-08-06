@@ -190,11 +190,12 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             signalProvider.spectrumSnapshot.collect { snapshot ->
                 // Process Wi-Fi Metrics
                 snapshot.wifiMetrics.forEach { wifi ->
+                    val rawHash = kotlin.math.abs(wifi.bssid.hashCode())
                     val wifiBlip = RadarBlip(
                         id = "wifi_" + wifi.bssid,
                         name = wifi.ssid,
                         distance = wifi.distanceRttMeters ?: (Math.pow(10.0, (27.55 - (20 * kotlin.math.log10(wifi.frequencyMhz.toDouble())) + kotlin.math.abs(wifi.rssiDbm)) / 20.0)).toFloat().coerceIn(1.0f, 40.0f),
-                        targetAngleOffset = (wifi.bssid.hashCode().run { kotlin.math.abs(this) % 360 }).toFloat(),
+                        targetAngleOffset = (rawHash * 137.5f) % 360f,
                         type = "WIFI",
                         rssi = wifi.rssiDbm,
                         frequencyMhz = wifi.frequencyMhz.toDouble(),
@@ -303,7 +304,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
                 // Map database BLE devices to sweep radar
                 bleDevices.forEach { dev ->
-                    val angle = (dev.macAddress.hashCode().run { Math.abs(this) % 360 }).toFloat()
+                    val angle = ((Math.abs(dev.macAddress.hashCode()) * 137.5f) % 360f)
                     val isCs = dev.isChannelSoundingCapable
                     val bandLabelText = if (isCs) {
                         "BT 6.0 CS (±${String.format("%.2f", dev.csEstimatedAccuracyMeters)}m)"
@@ -411,7 +412,8 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
         val smoothedBlip = rawBlip.copy(
             distance = smoothedDistance,
-            rssi = smoothedRssi
+            rssi = smoothedRssi,
+            targetAngleOffset = rawBlip.targetAngleOffset
         )
 
         blipMap[smoothedBlip.id] = smoothedBlip

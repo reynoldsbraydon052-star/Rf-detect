@@ -39,7 +39,9 @@ data class WifiSpectrumMetric(
     val band: String, // 2.4GHz, 5GHz, 6GHz
     val channelWidthMhz: Int,
     val distanceRttMeters: Float?,
-    val is80211mcSupported: Boolean
+    val is80211mcSupported: Boolean,
+    val signalLevelPercent: Int = 0,
+    val capabilities: String = ""
 )
 
 data class BleSpectrumMetric(
@@ -168,6 +170,7 @@ class SignalProvider(private val context: Context) : SensorEventListener {
         // 1. Wi-Fi Interception
         val wifiList = mutableListOf<WifiSpectrumMetric>()
         try {
+            wifiManager?.startScan()
             val scanResults = wifiManager?.scanResults
             scanResults?.forEach { result ->
                 val band = when {
@@ -180,6 +183,9 @@ class SignalProvider(private val context: Context) : SensorEventListener {
                     result.is80211mcResponder
                 } else false
 
+                val sigPct = ((result.level + 100) * 2).coerceIn(0, 100)
+                val caps = result.capabilities ?: "OPEN"
+
                 wifiList.add(
                     WifiSpectrumMetric(
                         bssid = result.BSSID ?: "00:00:00:00:00:00",
@@ -189,7 +195,9 @@ class SignalProvider(private val context: Context) : SensorEventListener {
                         band = band,
                         channelWidthMhz = 20,
                         distanceRttMeters = if (is80211mc) (Math.pow(10.0, (27.55 - (20 * log10(result.frequency.toDouble())) + abs(result.level)) / 20.0)).toFloat() else null,
-                        is80211mcSupported = is80211mc
+                        is80211mcSupported = is80211mc,
+                        signalLevelPercent = sigPct,
+                        capabilities = caps
                     )
                 )
             }
@@ -199,9 +207,9 @@ class SignalProvider(private val context: Context) : SensorEventListener {
             // High-fidelity fallback Wi-Fi spectrum nodes
             wifiList.addAll(
                 listOf(
-                    WifiSpectrumMetric("00:14:22:01:8A:12", "Tactical_Recon_AP_6G", -48, 6105, "6 GHz", 160, 3.2f, true),
-                    WifiSpectrumMetric("F8:0F:F9:8B:10:99", "Pixel_Hotspot_5G", -55, 5220, "5 GHz", 80, 5.1f, false),
-                    WifiSpectrumMetric("68:C6:3A:44:00:1C", "Covert_Hidden_Cam_AP", -62, 2437, "2.4 GHz", 20, null, false)
+                    WifiSpectrumMetric("00:14:22:01:8A:12", "Tactical_Recon_AP_6G", -48, 6105, "6 GHz", 160, 3.2f, true, 88, "[WPA3-SAE-CCMP]"),
+                    WifiSpectrumMetric("F8:0F:F9:8B:10:99", "Pixel_Hotspot_5G", -55, 5220, "5 GHz", 80, 5.1f, false, 74, "[WPA2-PSK-CCMP]"),
+                    WifiSpectrumMetric("68:C6:3A:44:00:1C", "Covert_Hidden_Cam_AP", -62, 2437, "2.4 GHz", 20, null, false, 60, "[WPA2-PSK-CCMP]")
                 )
             )
         }

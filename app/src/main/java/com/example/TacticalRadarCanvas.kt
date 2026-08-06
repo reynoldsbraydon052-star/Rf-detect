@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -134,10 +136,16 @@ fun TacticalRadarCanvas(
     val bleCyan = Color(0xFF00E5FF)
     val audioYellow = Color(0xFFFFCC00)
 
-    Box(
-        modifier = modifier
+    val containerModifier = if (modifier == Modifier) {
+        Modifier
             .fillMaxWidth()
-            .height(if (isMapMaximized) 480.dp else 320.dp)
+            .height(if (isMapMaximized) 460.dp else 340.dp)
+    } else {
+        modifier
+    }
+
+    Box(
+        modifier = containerModifier
             .testTag("tactical_radar_container")
     ) {
         Canvas(
@@ -150,6 +158,42 @@ fun TacticalRadarCanvas(
                             onZoomIn()
                         } else if (zoom < 0.95f) {
                             onZoomOut()
+                        }
+                    }
+                }
+                .pointerInput(blips, headingDegrees, mapRangeMeters) {
+                    detectTapGestures { tapOffset ->
+                        val maxRadius = min(size.width / 2f, size.height / 2f) - 44f
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
+                        val effectiveMaxRange = mapRangeMeters.coerceAtLeast(2.0f)
+
+                        var closestBlipId: String? = null
+                        var minDistanceToTap = Float.MAX_VALUE
+
+                        for (blip in blips) {
+                            val rawRatio = (blip.distance / effectiveMaxRange).coerceIn(0.01f, 4.0f)
+                            val radialFraction = if (rawRatio <= 1.0f) {
+                                Math.pow(rawRatio.toDouble(), 0.70).toFloat()
+                            } else {
+                                0.88f + (0.09f * (1.0f - kotlin.math.exp(-0.7f * (rawRatio - 1.0f))))
+                            }
+                            val cappedRadius = (radialFraction * maxRadius).coerceAtMost(maxRadius - 10f)
+                            val trueAngleRad = Math.toRadians((blip.targetAngleOffset - headingDegrees).toDouble())
+                            val bx = centerX + (cappedRadius * sin(trueAngleRad)).toFloat()
+                            val by = centerY - (cappedRadius * cos(trueAngleRad)).toFloat()
+
+                            val dist = kotlin.math.hypot((bx - tapOffset.x).toDouble(), (by - tapOffset.y).toDouble()).toFloat()
+                            if (dist < minDistanceToTap) {
+                                minDistanceToTap = dist
+                                closestBlipId = blip.id
+                            }
+                        }
+
+                        if (closestBlipId != null && minDistanceToTap <= 54f) {
+                            onSelectTargetDevice(closestBlipId)
+                        } else {
+                            onSelectTargetDevice(null)
                         }
                     }
                 }
@@ -257,18 +301,108 @@ fun TacticalRadarCanvas(
                 )
             }
 
-            // 4. Render Discovered Signal Blips & Target Locking Vector
-            for (blip in blips) {
-                val radius = (blip.distance / maxDistanceRange) * maxRadius
-                val cappedRadius = radius.coerceAtMost(maxRadius)
+            // 4. Render Discovered Signal Blips & Target Locking Vector with Deconfliction Engine
+            data class PositionedBlip(
+                val blip: RadarBlip,
+                val rawX: Float,
+                val rawY: Float,
+                var currentX: Float,
+                var currentY: Float,
+                val isSelectedTarget: Boolean,
+                val isNearestTarget: Boolean
+            )
+
+            val positionedList = blips.map { blip ->
+                val rawRatio = (blip.distance / maxDistanceRange).coerceIn(0.01f, 4.0f)
+                val radialFraction = if (rawRatio <= 1.0f) {
+                    Math.pow(rawRatio.toDouble(), 0.70).toFloat()
+                } else {
+                    0.88f + (0.09f * (1.0f - kotlin.math.exp(-0.7f * (rawRatio - 1.0f))))
+                }
+                val cappedRadius = (radialFraction * maxRadius).coerceAtMost(maxRadius - 10f)
                 val trueAngleRad = Math.toRadians((blip.targetAngleOffset - headingDegrees).toDouble())
 
-                val blipX = centerX + (cappedRadius * sin(trueAngleRad)).toFloat()
-                val blipY = centerY - (cappedRadius * cos(trueAngleRad)).toFloat()
+                val rawX = centerX + (cappedRadius * sin(trueAngleRad)).toFloat()
+                val rawY = centerY - (cappedRadius * cos(trueAngleRad)).toFloat()
 
                 val isSelectedTarget = selectedTargetDeviceId != null &&
                         (blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId)
                 val isNearestTarget = selectedTargetDeviceId == null && blip.id == nearestBlipId
+
+                PositionedBlip(
+                    blip = blip,
+                    rawX = rawX,
+                    rawY = rawY,
+                    currentX = rawX,
+                    currentY = rawY,
+                    isSelectedTarget = isSelectedTarget,
+                    isNearestTarget = isNearestTarget
+                )
+            }.toMutableList()
+
+            // Iterative Repulsion Deconfliction Pass (Separates overlapping blip dots)
+            val minDotDist = 32f
+            repeat(4) {
+                for (i in positionedList.indices) {
+                    for (j in i + 1 until positionedList.size) {
+                        val p1 = positionedList[i]
+                        val p2 = positionedList[j]
+
+                        var dx = p2.currentX - p1.currentX
+                        var dy = p2.currentY - p1.currentY
+                        var dist = kotlin.math.hypot(dx, dy)
+
+                        if (dist < minDotDist) {
+                            if (dist < 0.1f) {
+                                dx = 1.0f
+                                dy = 1.0f
+                                dist = 1.414f
+                            }
+
+                            val overlap = (minDotDist - dist) / 2f
+                            val nx = dx / dist
+                            val ny = dy / dist
+
+                            if (!p1.isSelectedTarget) {
+                                p1.currentX -= nx * overlap
+                                p1.currentY -= ny * overlap
+                            }
+                            if (!p2.isSelectedTarget) {
+                                p2.currentX += nx * overlap
+                                p2.currentY += ny * overlap
+                            }
+                        }
+                    }
+                }
+
+                // Clamp to radar display boundary
+                for (p in positionedList) {
+                    val distFromCenter = kotlin.math.hypot(p.currentX - centerX, p.currentY - centerY)
+                    val maxAllowed = maxRadius - 12f
+                    if (distFromCenter > maxAllowed && distFromCenter > 0f) {
+                        p.currentX = centerX + (p.currentX - centerX) / distFromCenter * maxAllowed
+                        p.currentY = centerY + (p.currentY - centerY) / distFromCenter * maxAllowed
+                    }
+                }
+            }
+
+            // Determine top closest blip IDs for clean label decluttering when total node count is large
+            val sortedByDist = blips.sortedBy { it.distance }
+            val topLabeledIds = if (blips.size > 10) {
+                sortedByDist.take(8).map { it.id }.toSet()
+            } else {
+                blips.map { it.id }.toSet()
+            }
+
+            // Draw non-selected blips first, then selected target blip last on top
+            val sortedList = positionedList.sortedBy { if (it.isSelectedTarget) 1 else 0 }
+
+            for (p in sortedList) {
+                val blip = p.blip
+                val blipX = p.currentX
+                val blipY = p.currentY
+                val isSelectedTarget = p.isSelectedTarget
+                val isNearestTarget = p.isNearestTarget
 
                 val nodeColor = when (blip.type.uppercase()) {
                     "WIFI" -> wifiGreen
@@ -279,6 +413,18 @@ fun TacticalRadarCanvas(
                 }
 
                 val isBreach = blip.distance < perimeterThresholdMeters
+
+                // If blip was displaced by deconfliction engine, draw connecting tether line to exact raw coordinate
+                val shiftDist = kotlin.math.hypot(p.currentX - p.rawX, p.currentY - p.rawY)
+                if (shiftDist > 8f) {
+                    drawLine(
+                        color = nodeColor.copy(alpha = 0.4f),
+                        start = Offset(p.rawX, p.rawY),
+                        end = Offset(p.currentX, p.currentY),
+                        strokeWidth = 1.2f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f))
+                    )
+                }
 
                 // Breach warning pulse ring
                 if (isBreach) {
@@ -329,6 +475,7 @@ fun TacticalRadarCanvas(
                     )
 
                     // Locked Target Label Callout
+                    targetTextPaint.textAlign = android.graphics.Paint.Align.LEFT
                     drawContext.canvas.nativeCanvas.drawText(
                         "LOCKED TARGET: ${blip.name} (%.1fm)".format(blip.distance),
                         blipX + 18f,
@@ -347,14 +494,12 @@ fun TacticalRadarCanvas(
                 // Bluetooth 6.0 Channel Sounding (CS) Sub-Meter Precision Halo & Reticle
                 if (blip.isChannelSoundingCapable && !isSelectedTarget) {
                     val csHaloRadius = ((blip.csEstimatedAccuracyMeters / maxDistanceRange) * maxRadius).coerceIn(8f, 35f)
-                    // Precision Halo Ring representing sub-meter error margin
                     drawCircle(
                         color = Color(0xFF00E5FF).copy(alpha = 0.55f),
                         radius = csHaloRadius,
                         center = Offset(blipX, blipY),
                         style = Stroke(width = 1.8f)
                     )
-                    // High-Precision CS Diamond Reticle
                     val diamondPath = Path().apply {
                         moveTo(blipX, blipY - 12f)
                         lineTo(blipX + 12f, blipY)
@@ -376,19 +521,35 @@ fun TacticalRadarCanvas(
                     center = Offset(blipX, blipY)
                 )
 
-                // Name tag
-                if (!isSelectedTarget) {
+                // Smart Label Placement with Directional Text Alignment (Decluttered)
+                val shouldDrawLabel = !isSelectedTarget && (isNearestTarget || blip.isChannelSoundingCapable || isBreach || topLabeledIds.contains(blip.id))
+                if (shouldDrawLabel) {
                     val labelText = if (blip.isChannelSoundingCapable) {
                         "${blip.name.take(10)} (%.1fm ±%.2fm CS)".format(blip.distance, blip.csEstimatedAccuracyMeters)
                     } else {
                         "${blip.name.take(12)} (%.1fm)".format(blip.distance)
                     }
-                    drawContext.canvas.nativeCanvas.drawText(
-                        labelText,
-                        blipX + 14f,
-                        blipY + 6f,
-                        if (blip.isChannelSoundingCapable) targetTextPaint else blipTextPaint
-                    )
+
+                    val paint = if (blip.isChannelSoundingCapable) targetTextPaint else blipTextPaint
+                    val isRightHalf = blipX >= centerX
+
+                    if (isRightHalf) {
+                        paint.textAlign = android.graphics.Paint.Align.LEFT
+                        drawContext.canvas.nativeCanvas.drawText(
+                            labelText,
+                            blipX + 14f,
+                            blipY + 5f,
+                            paint
+                        )
+                    } else {
+                        paint.textAlign = android.graphics.Paint.Align.RIGHT
+                        drawContext.canvas.nativeCanvas.drawText(
+                            labelText,
+                            blipX - 14f,
+                            blipY + 5f,
+                            paint
+                        )
+                    }
                 }
             }
         }

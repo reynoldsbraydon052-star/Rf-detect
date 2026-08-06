@@ -136,7 +136,7 @@ class ScannerBackgroundAlertService : Service() {
                 .setContentText("${alert.deviceName} [${alert.macAddress}] • Distance: %.1fm".format(alert.distanceMeters))
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_LIGHTS)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build()

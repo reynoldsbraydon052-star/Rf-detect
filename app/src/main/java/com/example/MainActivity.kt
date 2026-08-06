@@ -27,11 +27,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -506,7 +508,9 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
 
                         RadarTab.SPECTRUM_ANALYZER -> SpectrumAnalyzerScreen(
                             uiState = uiState,
-                            onFilterSelected = { viewModel.setFilterType(it) }
+                            onFilterSelected = { viewModel.setFilterType(it) },
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onToggleAudioSonar = { viewModel.toggleAudioSonar() }
                         )
 
                         RadarTab.DETECTED_SENSORS -> DetectedSensorsScreen(
@@ -583,14 +587,14 @@ fun TacticalHeader(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .border(
                 1.dp,
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                RoundedCornerShape(12.dp)
+                RoundedCornerShape(10.dp)
             )
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -747,14 +751,21 @@ fun TacticalHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.weight(1f, fill = false),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "ANTENNAS: ${uiState.activeAntennaCount} (Wi-Fi/BLE/Cell/EMF/Mic)",
+                    text = "ANTENNAS: ${uiState.activeAntennaCount}",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color.Gray
                 )
                 Text(
                     text = "NODES: ${uiState.activeBlips.size}",
+                    maxLines = 1,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
@@ -766,11 +777,14 @@ fun TacticalHeader(
             uiState.nearestBlip?.let { nearest ->
                 Text(
                     text = "NEAREST: ${nearest.name.take(10)} (${String.format("%.1fm", nearest.distance)})",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     ),
-                    color = if (nearest.distance < uiState.perimeterThresholdMeters) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    color = if (nearest.distance < uiState.perimeterThresholdMeters) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 6.dp)
                 )
             }
         }
@@ -1003,9 +1017,8 @@ fun SweepRadarScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FilterChipsRow(
                 selectedFilter = uiState.selectedFilterType,
@@ -1015,14 +1028,14 @@ fun SweepRadarScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(if (uiState.isMapMaximized) 480.dp else 340.dp)
-                    .background(Color(0xFF08120E), RoundedCornerShape(20.dp))
+                    .weight(1f)
+                    .background(Color(0xFF08120E), RoundedCornerShape(16.dp))
                     .border(
                         1.dp,
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        RoundedCornerShape(20.dp)
+                        RoundedCornerShape(16.dp)
                     )
-                    .padding(12.dp),
+                    .padding(6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 TacticalRadarCanvas(
@@ -1038,14 +1051,15 @@ fun SweepRadarScreen(
                     onSetMapRange = onSetMapRange,
                     onToggleMaximizeMap = onToggleMaximizeMap,
                     onOpenFullScreenMap = onOpenFullScreenMap,
-                    onSelectTargetDevice = onSelectTargetDevice
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp),
-                    shape = RoundedCornerShape(8.dp),
+                        .padding(6.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = Color.Black.copy(alpha = 0.6f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
                 ) {
@@ -1053,32 +1067,41 @@ fun SweepRadarScreen(
                         text = "HEADING: ${uiState.headingDegrees.toInt()}°",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp
                         ),
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
 
-            QuickControlsCard(
-                uiState = uiState,
-                onToggleAudioSonar = onToggleAudioSonar,
-                onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                onToggleScanning = onToggleScanning
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 160.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                QuickControlsCard(
+                    uiState = uiState,
+                    onToggleAudioSonar = onToggleAudioSonar,
+                    onTogglePerimeterAlarm = onTogglePerimeterAlarm,
+                    onToggleScanning = onToggleScanning
+                )
 
-            BleDatabaseTrackerCard(
-                bleDevices = uiState.savedBleDevices,
-                isScannerActive = uiState.isBleScannerServiceActive,
-                selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                isAudioSonarActive = uiState.isAudioSonarActive,
-                onToggleScanner = onToggleBleScanner,
-                onClearDatabase = onClearBleDb,
-                onDeleteDevice = onDeleteBleDevice,
-                onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
-                onPlayTestPing = onPlayTestPing
-            )
+                BleDatabaseTrackerCard(
+                    bleDevices = uiState.savedBleDevices,
+                    isScannerActive = uiState.isBleScannerServiceActive,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    isAudioSonarActive = uiState.isAudioSonarActive,
+                    onToggleScanner = onToggleBleScanner,
+                    onClearDatabase = onClearBleDb,
+                    onDeleteDevice = onDeleteBleDevice,
+                    onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
+                    onPlayTestPing = onPlayTestPing
+                )
+            }
         }
     }
 }
@@ -1256,19 +1279,234 @@ fun PhoneAntennaArrayCard(telemetryList: List<AntennaTelemetry>) {
 }
 
 @Composable
+fun PinpointDeviceHUDCard(
+    uiState: SignalRadarUiState,
+    onUnlockTarget: () -> Unit,
+    onToggleAudioSonar: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val targetBlip = uiState.activeBlips.find { 
+        it.id == uiState.selectedTargetDeviceId || it.name == uiState.selectedTargetDeviceId 
+    } ?: uiState.nearestBlip ?: return
+
+    val heading = uiState.headingDegrees
+    val relativeAngle = (targetBlip.targetAngleOffset - heading + 360f) % 360f
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("pinpoint_target_hud_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF07140B)),
+        border = BorderStroke(1.5.dp, Color(0xFF00FF66))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header: Target Name & Status
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = "Target Pinpoint",
+                        tint = Color(0xFF00FF66),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "PINPOINT TARGET LOCKED",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.5.sp
+                            ),
+                            color = Color(0xFF00FF66)
+                        )
+                        Text(
+                            text = targetBlip.name,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.White
+                        )
+                    }
+                }
+
+                IconButton(onClick = onUnlockTarget) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Unlock Pinpoint Target",
+                        tint = Color.Gray
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFF1B3D28))
+
+            // Proximity & Signal Metrics Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Pinpoint Distance Gauge
+                Column {
+                    Text(
+                        text = "ESTIMATED DISTANCE",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        ),
+                        color = Color.Gray
+                    )
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = String.format("%.1f", targetBlip.distance),
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (targetBlip.distance < uiState.perimeterThresholdMeters) Color(0xFFFF3366) else Color(0xFF00FF66)
+                        )
+                        Text(
+                            text = "METERS",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
+
+                // Signal Strength dBm
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "SIGNAL INTENSITY",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        ),
+                        color = Color.Gray
+                    )
+                    val pct = ((targetBlip.rssi + 100) * 2).coerceIn(0, 100)
+                    Text(
+                        text = "${targetBlip.rssi} dBm (${pct}%)",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00E5FF)
+                    )
+                }
+            }
+
+            // Signal Strength Meter
+            val normalizedRssi = ((targetBlip.rssi + 100) / 70f).coerceIn(0.05f, 1f)
+            LinearProgressIndicator(
+                progress = { normalizedRssi },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = if (targetBlip.distance < uiState.perimeterThresholdMeters) Color(0xFFFF3366) else Color(0xFF00FF66),
+                trackColor = Color(0xFF14291B)
+            )
+
+            // Directional Guidance & Audio Sonar Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Radar,
+                        contentDescription = "Bearing",
+                        tint = Color.Yellow,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "BEARING: ${relativeAngle.toInt()}° | ${targetBlip.bandLabel}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        ),
+                        color = Color.Yellow
+                    )
+                }
+
+                Button(
+                    onClick = onToggleAudioSonar,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (uiState.isAudioSonarActive) Color(0xFF00FF66) else Color(0xFF14291B),
+                        contentColor = if (uiState.isAudioSonarActive) Color.Black else Color(0xFF00FF66)
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (uiState.isAudioSonarActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                        contentDescription = "Audio Sonar",
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (uiState.isAudioSonarActive) "SONAR ACTIVE" else "MUTE SONAR",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SpectrumInterceptCard(
     blip: RadarBlip,
-    perimeterThresholdMeters: Float
+    perimeterThresholdMeters: Float,
+    selectedTargetDeviceId: String? = null,
+    onSelectTargetDevice: ((String?) -> Unit)? = null
 ) {
+    val isSelectedTarget = selectedTargetDeviceId != null &&
+            (blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("spectrum_item_${blip.id}"),
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelectedTarget) Color(0xFF0F2618) else MaterialTheme.colorScheme.surface
+        ),
         border = BorderStroke(
-            1.dp,
-            if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            1.5.dp,
+            if (isSelectedTarget) Color(0xFF00FF66)
+            else if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
         )
     ) {
         Column(
@@ -1283,14 +1521,36 @@ fun SpectrumInterceptCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text(
-                        text = blip.name,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = blip.name,
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (isSelectedTarget) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF00FF66)
+                            ) {
+                                Text(
+                                    text = "PINPOINTED",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.Black,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
                     Text(
                         text = "${blip.bandLabel} | ${blip.frequencyMhz.toInt()} MHz",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -1298,31 +1558,70 @@ fun SpectrumInterceptCard(
                     )
                 }
 
-                // Kalman Distance Badge
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                // Kalman Distance Badge & Pinpoint Quick Action
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "${String.format("%.1f", blip.distance)}m",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "${String.format("%.1f", blip.distance)}m",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    if (onSelectTargetDevice != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelectedTarget) Color(0xFF00FF66) else Color(0xFF142E1F))
+                                .clickable {
+                                    onSelectTargetDevice.invoke(if (isSelectedTarget) null else blip.id)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MyLocation,
+                                    contentDescription = "Pinpoint Target",
+                                    tint = if (isSelectedTarget) Color.Black else Color(0xFF00FF66),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isSelectedTarget) "LOCKED" else "PINPOINT",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = if (isSelectedTarget) Color.Black else Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            // RSSI Signal Strength Progress Bar
+            // RSSI Signal Strength Progress Bar & Quality Percentage
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    val pct = ((blip.rssi + 100) * 2).coerceIn(0, 100)
                     Text(
-                        text = "RSSI: ${blip.rssi} dBm",
+                        text = "RSSI: ${blip.rssi} dBm (${pct}% Signal)",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = Color.Gray
                     )
@@ -1357,6 +1656,8 @@ fun SpectrumInterceptCard(
 fun SpectrumAnalyzerScreen(
     uiState: SignalRadarUiState,
     onFilterSelected: (String) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit = {},
+    onToggleAudioSonar: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -1375,6 +1676,13 @@ fun SpectrumAnalyzerScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (uiState.selectedTargetDeviceId != null) {
+                    PinpointDeviceHUDCard(
+                        uiState = uiState,
+                        onUnlockTarget = { onSelectTargetDevice(null) },
+                        onToggleAudioSonar = onToggleAudioSonar
+                    )
+                }
                 PhoneAntennaArrayCard(telemetryList = uiState.antennaArrayTelemetry)
                 LargeSpectrumVisualizerCard(activeBlips = uiState.activeBlips)
             }
@@ -1404,7 +1712,12 @@ fun SpectrumAnalyzerScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     items(filteredBlips, key = { it.id }) { blip ->
-                        SpectrumInterceptCard(blip = blip, perimeterThresholdMeters = uiState.perimeterThresholdMeters)
+                        SpectrumInterceptCard(
+                            blip = blip,
+                            perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+                            selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                            onSelectTargetDevice = onSelectTargetDevice
+                        )
                     }
                 }
             }
@@ -1416,6 +1729,16 @@ fun SpectrumAnalyzerScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            if (uiState.selectedTargetDeviceId != null) {
+                item {
+                    PinpointDeviceHUDCard(
+                        uiState = uiState,
+                        onUnlockTarget = { onSelectTargetDevice(null) },
+                        onToggleAudioSonar = onToggleAudioSonar
+                    )
+                }
+            }
+
             item {
                 FilterChipsRow(
                     selectedFilter = uiState.selectedFilterType,
@@ -1443,7 +1766,12 @@ fun SpectrumAnalyzerScreen(
             }
 
             items(filteredBlips, key = { it.id }) { blip ->
-                SpectrumInterceptCard(blip = blip, perimeterThresholdMeters = uiState.perimeterThresholdMeters)
+                SpectrumInterceptCard(
+                    blip = blip,
+                    perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    onSelectTargetDevice = onSelectTargetDevice
+                )
             }
         }
     }
@@ -2231,9 +2559,9 @@ fun BottomRadarNavBar(
                     modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             imageVector = when (tab) {
@@ -3893,7 +4221,7 @@ fun SpatialD3HeatmapComponent(
 }
 
 @Composable
-private fun SpatialD3HeatmapCanvas(
+fun SpatialD3HeatmapCanvas(
     blips: List<RadarBlip>,
     history: List<SignalHistoryItem>,
     isKdeMode: Boolean
@@ -4024,7 +4352,7 @@ private fun SpatialD3HeatmapCanvas(
 
 
 @Composable
-private fun rememberFilteredBlips(blips: List<RadarBlip>, filterType: String): List<RadarBlip> {
+fun rememberFilteredBlips(blips: List<RadarBlip>, filterType: String): List<RadarBlip> {
     return if (filterType == "ALL") {
         blips
     } else {
