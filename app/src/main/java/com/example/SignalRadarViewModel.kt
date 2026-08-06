@@ -87,6 +87,7 @@ enum class PerimeterSensitivityPreset(
 enum class RadarTab {
     SWEEP_RADAR,
     FULL_RADAR,
+    SCANNER,
     SPECTRUM_ANALYZER,
     DETECTED_SENSORS,
     HISTORIC_HEATMAP,

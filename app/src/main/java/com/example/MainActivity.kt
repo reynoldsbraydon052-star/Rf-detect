@@ -266,7 +266,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     uiState = uiState,
                     onOpenSettings = { viewModel.setTab(RadarTab.SETTINGS) },
                     onOpenDocOverlay = { showHardwareDocOverlay = true },
-                    onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) }
+                    onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) },
+                    onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) }
                 )
 
                 // Accompanist Permissions Banner for Location Access (required for Bluetooth & Wi-Fi scanning)
@@ -506,11 +507,31 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) }
                         )
 
+                        RadarTab.SCANNER -> TacticalScannerScreen(
+                            uiState = uiState,
+                            onToggleBleScanner = { viewModel.toggleBleScannerService() },
+                            onToggleScanning = { viewModel.toggleScanning() },
+                            onFilterSelected = { viewModel.setFilterType(it) },
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onOpenArCameraForTarget = { targetId ->
+                                viewModel.selectTargetDevice(targetId)
+                                viewModel.setFullScreenMapMode("AR")
+                                viewModel.toggleFullScreenMap(true)
+                            },
+                            onPlayTestPing = { viewModel.playTestAudioPing(it) },
+                            onClearScanHistory = { viewModel.clearBleDatabaseLogs() }
+                        )
+
                         RadarTab.SPECTRUM_ANALYZER -> SpectrumAnalyzerScreen(
                             uiState = uiState,
                             onFilterSelected = { viewModel.setFilterType(it) },
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
-                            onToggleAudioSonar = { viewModel.toggleAudioSonar() }
+                            onToggleAudioSonar = { viewModel.toggleAudioSonar() },
+                            onOpenArCameraForTarget = { targetId ->
+                                viewModel.selectTargetDevice(targetId)
+                                viewModel.setFullScreenMapMode("AR")
+                                viewModel.toggleFullScreenMap(true)
+                            }
                         )
 
                         RadarTab.DETECTED_SENSORS -> DetectedSensorsScreen(
@@ -581,7 +602,8 @@ fun TacticalHeader(
     uiState: SignalRadarUiState,
     onOpenSettings: (() -> Unit)? = null,
     onOpenDocOverlay: (() -> Unit)? = null,
-    onOpenFullRadar: (() -> Unit)? = null
+    onOpenFullRadar: (() -> Unit)? = null,
+    onOpenScanner: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -641,6 +663,38 @@ fun TacticalHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (onOpenScanner != null) {
+                    Surface(
+                        onClick = onOpenScanner,
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (uiState.selectedTab == RadarTab.SCANNER) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.testTag("header_open_scanner_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sensors,
+                                contentDescription = "Scanner",
+                                tint = if (uiState.selectedTab == RadarTab.SCANNER) Color.Black else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "SCANNER",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = if (uiState.selectedTab == RadarTab.SCANNER) Color.Black else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
                 if (onOpenFullRadar != null) {
                     Surface(
                         onClick = onOpenFullRadar,
@@ -992,6 +1046,12 @@ fun SweepRadarScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                CompassDeviceFinderCard(
+                    uiState = uiState,
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    onToggleAudioSonar = onToggleAudioSonar
+                )
+
                 QuickControlsCard(
                     uiState = uiState,
                     onToggleAudioSonar = onToggleAudioSonar,
@@ -1079,10 +1139,16 @@ fun SweepRadarScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 160.dp)
+                    .heightIn(max = 240.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                CompassDeviceFinderCard(
+                    uiState = uiState,
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    onToggleAudioSonar = onToggleAudioSonar
+                )
+
                 QuickControlsCard(
                     uiState = uiState,
                     onToggleAudioSonar = onToggleAudioSonar,
@@ -1285,203 +1351,12 @@ fun PinpointDeviceHUDCard(
     onToggleAudioSonar: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val targetBlip = uiState.activeBlips.find { 
-        it.id == uiState.selectedTargetDeviceId || it.name == uiState.selectedTargetDeviceId 
-    } ?: uiState.nearestBlip ?: return
-
-    val heading = uiState.headingDegrees
-    val relativeAngle = (targetBlip.targetAngleOffset - heading + 360f) % 360f
-
-    Card(
+    CompassDeviceFinderCard(
+        uiState = uiState,
+        onSelectTargetDevice = { id -> if (id == null) onUnlockTarget() },
+        onToggleAudioSonar = onToggleAudioSonar,
         modifier = modifier
-            .fillMaxWidth()
-            .testTag("pinpoint_target_hud_card"),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF07140B)),
-        border = BorderStroke(1.5.dp, Color(0xFF00FF66))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Header: Target Name & Status
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Target Pinpoint",
-                        tint = Color(0xFF00FF66),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Column {
-                        Text(
-                            text = "PINPOINT TARGET LOCKED",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 9.5.sp
-                            ),
-                            color = Color(0xFF00FF66)
-                        )
-                        Text(
-                            text = targetBlip.name,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = Color.White
-                        )
-                    }
-                }
-
-                IconButton(onClick = onUnlockTarget) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Unlock Pinpoint Target",
-                        tint = Color.Gray
-                    )
-                }
-            }
-
-            HorizontalDivider(color = Color(0xFF1B3D28))
-
-            // Proximity & Signal Metrics Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Pinpoint Distance Gauge
-                Column {
-                    Text(
-                        text = "ESTIMATED DISTANCE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 9.sp
-                        ),
-                        color = Color.Gray
-                    )
-                    Row(
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = String.format("%.1f", targetBlip.distance),
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = if (targetBlip.distance < uiState.perimeterThresholdMeters) Color(0xFFFF3366) else Color(0xFF00FF66)
-                        )
-                        Text(
-                            text = "METERS",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                    }
-                }
-
-                // Signal Strength dBm
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "SIGNAL INTENSITY",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 9.sp
-                        ),
-                        color = Color.Gray
-                    )
-                    val pct = ((targetBlip.rssi + 100) * 2).coerceIn(0, 100)
-                    Text(
-                        text = "${targetBlip.rssi} dBm (${pct}%)",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = Color(0xFF00E5FF)
-                    )
-                }
-            }
-
-            // Signal Strength Meter
-            val normalizedRssi = ((targetBlip.rssi + 100) / 70f).coerceIn(0.05f, 1f)
-            LinearProgressIndicator(
-                progress = { normalizedRssi },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = if (targetBlip.distance < uiState.perimeterThresholdMeters) Color(0xFFFF3366) else Color(0xFF00FF66),
-                trackColor = Color(0xFF14291B)
-            )
-
-            // Directional Guidance & Audio Sonar Controls
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Radar,
-                        contentDescription = "Bearing",
-                        tint = Color.Yellow,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "BEARING: ${relativeAngle.toInt()}° | ${targetBlip.bandLabel}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp
-                        ),
-                        color = Color.Yellow
-                    )
-                }
-
-                Button(
-                    onClick = onToggleAudioSonar,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (uiState.isAudioSonarActive) Color(0xFF00FF66) else Color(0xFF14291B),
-                        contentColor = if (uiState.isAudioSonarActive) Color.Black else Color(0xFF00FF66)
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = if (uiState.isAudioSonarActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                        contentDescription = "Audio Sonar",
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (uiState.isAudioSonarActive) "SONAR ACTIVE" else "MUTE SONAR",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    )
-                }
-            }
-        }
-    }
+    )
 }
 
 @Composable
@@ -1658,6 +1533,7 @@ fun SpectrumAnalyzerScreen(
     onFilterSelected: (String) -> Unit,
     onSelectTargetDevice: (String?) -> Unit = {},
     onToggleAudioSonar: () -> Unit = {},
+    onOpenArCameraForTarget: (String) -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -1683,6 +1559,12 @@ fun SpectrumAnalyzerScreen(
                         onToggleAudioSonar = onToggleAudioSonar
                     )
                 }
+                RealTimeSignalStrengthChartCard(
+                    activeBlips = uiState.activeBlips,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    onOpenArCameraForTarget = onOpenArCameraForTarget
+                )
                 PhoneAntennaArrayCard(telemetryList = uiState.antennaArrayTelemetry)
                 LargeSpectrumVisualizerCard(activeBlips = uiState.activeBlips)
             }
@@ -1737,6 +1619,15 @@ fun SpectrumAnalyzerScreen(
                         onToggleAudioSonar = onToggleAudioSonar
                     )
                 }
+            }
+
+            item {
+                RealTimeSignalStrengthChartCard(
+                    activeBlips = uiState.activeBlips,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    onOpenArCameraForTarget = onOpenArCameraForTarget
+                )
             }
 
             item {
@@ -2567,6 +2458,7 @@ fun BottomRadarNavBar(
                             imageVector = when (tab) {
                                 RadarTab.SWEEP_RADAR -> Icons.Default.Radar
                                 RadarTab.FULL_RADAR -> Icons.Default.Radar
+                                RadarTab.SCANNER -> Icons.Default.Sensors
                                 RadarTab.SPECTRUM_ANALYZER -> Icons.Default.GraphicEq
                                 RadarTab.DETECTED_SENSORS -> Icons.Default.Sensors
                                 RadarTab.HISTORIC_HEATMAP -> Icons.Default.Map
@@ -2583,6 +2475,7 @@ fun BottomRadarNavBar(
                             text = when (tab) {
                                 RadarTab.SWEEP_RADAR -> "Sweep"
                                 RadarTab.FULL_RADAR -> "Full Radar"
+                                RadarTab.SCANNER -> "Scanner"
                                 RadarTab.SPECTRUM_ANALYZER -> "Spectrum"
                                 RadarTab.DETECTED_SENSORS -> "Sensors"
                                 RadarTab.HISTORIC_HEATMAP -> "Heatmap"
@@ -3908,6 +3801,15 @@ fun HistoricHeatmapScreen(uiState: SignalRadarUiState) {
                     }
                 }
             }
+        }
+
+        // Real-Time Signal Strength Time-Series Chart
+        item {
+            RealTimeSignalStrengthChartCard(
+                activeBlips = uiState.activeBlips,
+                selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                onSelectTargetDevice = {}
+            )
         }
 
         // D3 Spatial Distribution Heatmap Component

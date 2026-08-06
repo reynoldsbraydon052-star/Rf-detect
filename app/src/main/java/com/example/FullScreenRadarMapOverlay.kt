@@ -1,7 +1,9 @@
 package com.example
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,8 +50,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -63,10 +67,24 @@ data class ArTargetProjection(
     val screenY: Float,
     val depthRatio: Float,
     val isVisibleInFov: Boolean,
-    val relativeAngleDegrees: Float
+    val relativeAngleDegrees: Float,
+    val estimatedElevationMeters: Float,
+    val verticalAngleDegrees: Float
 )
 
 object UwbArTracker {
+    fun estimateTargetElevation(blip: RadarBlip): Float {
+        val hashOffset = ((blip.id.hashCode() and 0x7FFFFFFF) % 20) / 10f - 1.0f
+        return when (blip.type.uppercase()) {
+            "WIFI" -> 1.8f + hashOffset
+            "BLE" -> -0.4f + hashOffset
+            "CELLULAR" -> 3.2f + hashOffset
+            "MAGNETIC" -> -1.0f + hashOffset
+            "AUDIO" -> 0.2f + hashOffset
+            else -> 0.0f + hashOffset
+        }
+    }
+
     fun updateTargetPosition(
         blip: RadarBlip,
         headingDegrees: Float,
@@ -75,7 +93,8 @@ object UwbArTracker {
         mapRangeMeters: Float,
         containerWidth: Float,
         containerHeight: Float,
-        fovDegrees: Float = 60f
+        fovDegrees: Float = 60f,
+        rotationDegrees: Int = 0
     ): ArTargetProjection {
         var rawRelAngle = (blip.targetAngleOffset - headingDegrees + 360f) % 360f
         if (rawRelAngle > 180f) rawRelAngle -= 360f
@@ -84,13 +103,35 @@ object UwbArTracker {
         val isVisibleHorizontally = kotlin.math.abs(rawRelAngle) <= halfFov
 
         val xFraction = 0.5f + (rawRelAngle / fovDegrees)
-        val screenX = (xFraction * containerWidth).coerceIn(-containerWidth * 0.5f, containerWidth * 1.5f)
+        val baseScreenX = (xFraction * containerWidth).coerceIn(-containerWidth * 0.5f, containerWidth * 1.5f)
 
         val effectiveRange = mapRangeMeters.coerceAtLeast(1.0f)
         val depthRatio = (blip.distance / effectiveRange).coerceIn(0.05f, 3.0f)
 
-        val baseVerticalRatio = 0.45f + (depthRatio * 0.25f) - (pitchDegrees / 120f)
-        val screenY = (baseVerticalRatio.coerceIn(0.15f, 0.85f)) * containerHeight
+        val elevationMeters = estimateTargetElevation(blip)
+        val targetVerticalAngleRad = kotlin.math.atan2(
+            elevationMeters.toDouble(),
+            blip.distance.coerceAtLeast(0.5f).toDouble()
+        )
+        val targetVerticalAngleDeg = Math.toDegrees(targetVerticalAngleRad).toFloat()
+
+        val fovVerticalDegrees = fovDegrees * (containerHeight / containerWidth.coerceAtLeast(1f))
+        val totalVerticalAngleDelta = targetVerticalAngleDeg + pitchDegrees
+        val yFraction = 0.5f - (totalVerticalAngleDelta / fovVerticalDegrees)
+        val baseScreenY = yFraction * containerHeight
+
+        // Rotate coordinate projection relative to screen center based on screen orientation
+        val cx = containerWidth / 2f
+        val cy = containerHeight / 2f
+        val dx = baseScreenX - cx
+        val dy = baseScreenY - cy
+
+        val rad = Math.toRadians(-rotationDegrees.toDouble())
+        val cosR = kotlin.math.cos(rad).toFloat()
+        val sinR = kotlin.math.sin(rad).toFloat()
+
+        val finalScreenX = cx + (dx * cosR - dy * sinR)
+        val finalScreenY = cy + (dx * sinR + dy * cosR)
 
         return ArTargetProjection(
             id = blip.id,
@@ -98,11 +139,13 @@ object UwbArTracker {
             distanceMeters = blip.distance,
             rssiDbm = blip.rssi,
             type = blip.type,
-            screenX = screenX,
-            screenY = screenY,
+            screenX = finalScreenX,
+            screenY = finalScreenY,
             depthRatio = depthRatio,
-            isVisibleInFov = isVisibleHorizontally,
-            relativeAngleDegrees = rawRelAngle
+            isVisibleInFov = isVisibleHorizontally && finalScreenY >= -containerHeight * 0.2f && finalScreenY <= containerHeight * 1.2f,
+            relativeAngleDegrees = rawRelAngle,
+            estimatedElevationMeters = elevationMeters,
+            verticalAngleDegrees = targetVerticalAngleDeg
         )
     }
 }
@@ -125,6 +168,11 @@ fun UwbArCameraScreen(
         )
     }
 
+    var currentRotationDegrees by remember { mutableIntStateOf(0) }
+    var currentSurfaceRotation by remember { mutableIntStateOf(Surface.ROTATION_0) }
+    var previewUseCase by remember { mutableStateOf<Preview?>(null) }
+    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -134,6 +182,58 @@ fun UwbArCameraScreen(
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) {
             launcher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    DisposableEffect(context, lifecycleOwner) {
+        val orientationEventListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
+                val newRotation = when (orientation) {
+                    in 45..134 -> Surface.ROTATION_270
+                    in 135..224 -> Surface.ROTATION_180
+                    in 225..314 -> Surface.ROTATION_90
+                    else -> Surface.ROTATION_0
+                }
+                if (currentSurfaceRotation != newRotation) {
+                    currentSurfaceRotation = newRotation
+                    currentRotationDegrees = when (newRotation) {
+                        Surface.ROTATION_90 -> 90
+                        Surface.ROTATION_180 -> 180
+                        Surface.ROTATION_270 -> 270
+                        else -> 0
+                    }
+                    try {
+                        previewUseCase?.targetRotation = newRotation
+                    } catch (e: Exception) {
+                        android.util.Log.e("UwbArCameraScreen", "Failed setting preview rotation", e)
+                    }
+                }
+            }
+        }
+        if (orientationEventListener.canDetectOrientation()) {
+            orientationEventListener.enable()
+        }
+
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                try {
+                    cameraProviderRef?.unbindAll()
+                } catch (e: Exception) {
+                    android.util.Log.e("UwbArCameraScreen", "Error unbinding camera on pause", e)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            orientationEventListener.disable()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            try {
+                cameraProviderRef?.unbindAll()
+            } catch (e: Exception) {
+                android.util.Log.e("UwbArCameraScreen", "Error unbinding camera on dispose", e)
+            }
         }
     }
 
@@ -147,8 +247,9 @@ fun UwbArCameraScreen(
             AndroidView(
                 factory = { ctx ->
                     PreviewView(ctx).apply {
+                        setBackgroundColor(android.graphics.Color.BLACK)
                         scaleType = PreviewView.ScaleType.FILL_CENTER
-                        implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -157,12 +258,16 @@ fun UwbArCameraScreen(
                         cameraProviderFuture.addListener({
                             try {
                                 val cameraProvider = cameraProviderFuture.get()
+                                cameraProviderRef = cameraProvider
+
                                 val preview = Preview.Builder()
                                     .setTargetRotation(this.display?.rotation ?: Surface.ROTATION_0)
                                     .build()
                                     .also {
                                         it.setSurfaceProvider(this.surfaceProvider)
                                     }
+                                previewUseCase = preview
+
                                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                                 cameraProvider.unbindAll()
                                 cameraProvider.bindToLifecycle(
@@ -171,9 +276,17 @@ fun UwbArCameraScreen(
                                     preview
                                 )
                             } catch (e: Exception) {
-                                android.util.Log.e("UwbArCameraScreen", "Camera binding error", e)
+                                android.util.Log.e("UwbArCameraScreen", "Camera binding error in factory", e)
                             }
                         }, ContextCompat.getMainExecutor(ctx))
+                    }
+                },
+                update = { previewView ->
+                    // Keep update block lightweight to prevent unbinding/rebinding camera on recomposition
+                    try {
+                        previewUseCase?.targetRotation = currentSurfaceRotation
+                    } catch (e: Exception) {
+                        // ignore
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -207,7 +320,7 @@ fun UwbArCameraScreen(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(uiState.activeBlips, uiState.headingDegrees, mapRangeMeters) {
+                .pointerInput(uiState.activeBlips, uiState.headingDegrees, mapRangeMeters, currentRotationDegrees) {
                     detectTapGestures { tapOffset ->
                         val w = size.width.toFloat()
                         val h = size.height.toFloat()
@@ -222,7 +335,8 @@ fun UwbArCameraScreen(
                                 rollDegrees = rollDegrees,
                                 mapRangeMeters = mapRangeMeters,
                                 containerWidth = w,
-                                containerHeight = h
+                                containerHeight = h,
+                                rotationDegrees = currentRotationDegrees
                             )
                             val dist = kotlin.math.hypot(
                                 (proj.screenX - tapOffset.x).toDouble(),
@@ -280,7 +394,8 @@ fun UwbArCameraScreen(
                     rollDegrees = rollDegrees,
                     mapRangeMeters = mapRangeMeters,
                     containerWidth = w,
-                    containerHeight = h
+                    containerHeight = h,
+                    rotationDegrees = currentRotationDegrees
                 )
 
                 val isSelected = blip.id == uiState.selectedTargetDeviceId
@@ -298,6 +413,62 @@ fun UwbArCameraScreen(
                 val py = proj.screenY
 
                 if (proj.isVisibleInFov) {
+                    if (isSelected) {
+                        // Ground Laser Drop Pillar to anchor signal location in 3D
+                        val groundY = (horizonY + h * 0.35f).coerceAtMost(h - 40f)
+                        drawLine(
+                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
+                            start = Offset(px, py),
+                            end = Offset(px, groundY),
+                            strokeWidth = 2f
+                        )
+                        drawCircle(
+                            color = Color(0xFFFFCC00).copy(alpha = 0.3f),
+                            radius = 18f * visualScale,
+                            center = Offset(px, groundY),
+                            style = Stroke(width = 1.5f)
+                        )
+                        drawCircle(
+                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
+                            radius = 6f * visualScale,
+                            center = Offset(px, groundY)
+                        )
+
+                        // Reticle Corner Brackets [ ]
+                        val boxSize = 45f * visualScale
+                        val bracketLen = 14f * visualScale
+                        val bx = px - boxSize / 2f
+                        val by = py - boxSize / 2f
+
+                        val reticlePath = Path().apply {
+                            // Top-Left
+                            moveTo(bx, by + bracketLen)
+                            lineTo(bx, by)
+                            lineTo(bx + bracketLen, by)
+                            // Top-Right
+                            moveTo(bx + boxSize - bracketLen, by)
+                            lineTo(bx + boxSize, by)
+                            lineTo(bx + boxSize, by + bracketLen)
+                            // Bottom-Right
+                            moveTo(bx + boxSize, by + boxSize - bracketLen)
+                            lineTo(bx + boxSize, by + boxSize)
+                            lineTo(bx + boxSize - bracketLen, by + boxSize)
+                            // Bottom-Left
+                            moveTo(bx + bracketLen, by + boxSize)
+                            lineTo(bx, by + boxSize)
+                            lineTo(bx, by + boxSize - bracketLen)
+                        }
+                        drawPath(path = reticlePath, color = Color(0xFFFFCC00), style = Stroke(width = 3f))
+
+                        // Vector guidance line from camera crosshair center
+                        drawLine(
+                            color = Color(0xFFFFCC00).copy(alpha = 0.4f),
+                            start = Offset(w / 2f, h / 2f),
+                            end = Offset(px, py),
+                            strokeWidth = 1.5f
+                        )
+                    }
+
                     val path = Path().apply {
                         moveTo(px, py - arrowSize)
                         lineTo(px + arrowSize * 0.7f, py)
@@ -330,9 +501,10 @@ fun UwbArCameraScreen(
                         style = Stroke(width = 1.5f)
                     )
 
-                    val labelText = "${blip.name.take(12)}\n%.1fm • %ddBm".format(blip.distance, blip.rssi)
+                    val elevStr = if (proj.estimatedElevationMeters >= 0) "+%.1fm".format(proj.estimatedElevationMeters) else "%.1fm".format(proj.estimatedElevationMeters)
+                    val labelText = "${blip.name.take(12)}\n%.1fm • %ddBm\nALT: %s".format(blip.distance, blip.rssi, elevStr)
                     val textPaint = android.graphics.Paint().apply {
-                        color = android.graphics.Color.WHITE
+                        color = if (isSelected) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
                         textSize = (26f * visualScale).coerceIn(18f, 34f)
                         typeface = android.graphics.Typeface.MONOSPACE
                         isAntiAlias = true
@@ -369,6 +541,79 @@ fun UwbArCameraScreen(
                     }
 
                     drawPath(path = edgePath, color = targetColor.copy(alpha = 0.7f), style = Fill)
+
+                    if (isSelected) {
+                        // Off-screen lock guidance ray
+                        drawLine(
+                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
+                            start = Offset(w / 2f, h / 2f),
+                            end = Offset(edgeX, edgeY),
+                            strokeWidth = 2f
+                        )
+                    }
+                }
+            }
+        }
+
+        // Top Directional Guidance Banner overlay when a device is selected
+        val selectedBlip = uiState.activeBlips.firstOrNull { it.id == uiState.selectedTargetDeviceId }
+        if (selectedBlip != null) {
+            val proj = UwbArTracker.updateTargetPosition(
+                blip = selectedBlip,
+                headingDegrees = uiState.headingDegrees,
+                pitchDegrees = uiState.sensorSuite.pitchDeg,
+                rollDegrees = uiState.sensorSuite.rollDeg,
+                mapRangeMeters = mapRangeMeters,
+                containerWidth = 1000f,
+                containerHeight = 1000f,
+                rotationDegrees = currentRotationDegrees
+            )
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 70.dp, start = 16.dp, end = 16.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF07120B).copy(alpha = 0.9f),
+                border = BorderStroke(1.dp, Color(0xFFFFCC00))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.GpsFixed,
+                        contentDescription = "Target Lock",
+                        tint = Color(0xFFFFCC00),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column {
+                        val turnAngle = proj.relativeAngleDegrees.toInt()
+                        val turnDirection = when {
+                            turnAngle < -10 -> "◄ TURN LEFT ${kotlin.math.abs(turnAngle)}°"
+                            turnAngle > 10 -> "TURN RIGHT ${turnAngle}° ►"
+                            else -> "★ TARGET CENTERED IN FOV"
+                        }
+                        val elevTag = if (proj.estimatedElevationMeters >= 0) "+%.1fm".format(proj.estimatedElevationMeters) else "%.1fm".format(proj.estimatedElevationMeters)
+                        Text(
+                            text = "LOCKED: ${selectedBlip.name.take(16)} • %.1fm • ALT $elevTag".format(selectedBlip.distance),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            ),
+                            color = Color(0xFFFFCC00)
+                        )
+                        Text(
+                            text = "$turnDirection • RSSI ${selectedBlip.rssi}dBm • PITCH ${proj.verticalAngleDegrees.toInt()}°",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
