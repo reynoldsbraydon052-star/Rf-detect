@@ -42,6 +42,7 @@ fun CompassDeviceFinderCard(
     uiState: SignalRadarUiState,
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
+    onOpenCalibration: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isExpandedDeviceList by remember { mutableStateOf(false) }
@@ -100,6 +101,37 @@ fun CompassDeviceFinderCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Automated Figure-Eight Calibration Routine Trigger
+                    Surface(
+                        onClick = onOpenCalibration,
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF0F2618),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                        modifier = Modifier.testTag("compass_open_calibration_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AllInclusive,
+                                contentDescription = "Figure Eight Calibrate",
+                                tint = Color(0xFF00FF66),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "CALIBRATE",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                        }
+                    }
+
                     // Audio Sonar Pulse Toggle Button
                     IconButton(
                         onClick = onToggleAudioSonar,
@@ -272,13 +304,21 @@ fun CompassDeviceFinderCard(
                 // Calculate real-time relative angle (0° = straight ahead, 90° = right, 180° = behind, 270° = left)
                 val relativeAngle = (targetAngle - heading + 360f) % 360f
 
+                // Continuous shortest-path angle tracking for smooth animation without 360° spin jumps
+                var currentContinuousAngle by remember { mutableFloatStateOf(relativeAngle) }
+                val targetContinuousAngle = remember(relativeAngle) {
+                    var delta = relativeAngle - (currentContinuousAngle % 360f)
+                    if (delta < 0f) delta += 360f
+                    if (delta > 180f) delta -= 360f
+                    val next = currentContinuousAngle + delta
+                    currentContinuousAngle = next
+                    next
+                }
+
                 // Smooth rotation animation logic
                 val animAngle by animateFloatAsState(
-                    targetValue = relativeAngle,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow
-                    ),
+                    targetValue = targetContinuousAngle,
+                    animationSpec = tween(durationMillis = 200, easing = LinearOutSlowInEasing),
                     label = "compassArrowRotation"
                 )
 

@@ -22,5 +22,6 @@ data class BleDeviceEntity(
     val csPhaseQualityIndex: Int = 0, // 0 to 100% phase alignment score across 79 channels
     val csEstimatedAccuracyMeters: Float = 3.5f, // Precision error margin e.g., ±0.15m for CS vs ±3.5m for RSSI
     val csRttTimeOfFlightNs: Float = 0.0f, // Nanosecond flight time
-    val csChannelCount: Int = 0 // Number of RF channels swept (e.g. 79 channels)
+    val csChannelCount: Int = 0, // Number of RF channels swept (e.g. 79 channels)
+    val catalogueTag: String = "Uncategorized" // Custom user catalogue tag e.g. "Known Home Router", "Unknown Personal Tracker"
 )

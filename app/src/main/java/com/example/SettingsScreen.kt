@@ -1,6 +1,9 @@
 package com.example
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,12 +77,27 @@ fun SettingsScreen(
     onToggleHapticAlerts: (Boolean) -> Unit,
     onToggleVisualNotifs: (Boolean) -> Unit,
     onSetScanMode: (ScanMode) -> Unit,
-    onExportLogsCsv: () -> Unit,
-    onExportKmlBreadcrumbs: () -> Unit,
-    onPurgeHistory: () -> Unit
+    onExportLogsCsv: () -> Unit = {},
+    onExportKmlBreadcrumbs: () -> Unit = {},
+    onExportLogsCsvUri: (Uri) -> Unit = {},
+    onExportKmlBreadcrumbsUri: (Uri) -> Unit = {},
+    onPurgeHistory: () -> Unit,
+    onOpenCalibration: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    val csvExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let { onExportLogsCsvUri(it) }
+    }
+
+    val kmlExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.google-earth.kml+xml")
+    ) { uri ->
+        uri?.let { onExportKmlBreadcrumbsUri(it) }
+    }
 
     Scaffold(
         topBar = {
@@ -224,6 +243,61 @@ fun SettingsScreen(
                 title = "HARDWARE & RF SCANNING ENGINE",
                 subtitle = "Antenna polling frequency, RSSI cutoff & scan profile"
             )
+
+            // Automated Figure-Eight Compass & AR Calibration Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF041409)),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "AUTOMATED FIGURE-EIGHT CALIBRATION",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Refines geomagnetic compass declination & AR spatial accuracy matrices (${uiState.compassAccuracyScore}% accuracy)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = Color(0xFF00FF66)
+                        )
+                    }
+
+                    Button(
+                        onClick = onOpenCalibration,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF00FF66),
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("settings_run_figure8_calibration_button")
+                    ) {
+                        Text(
+                            text = "CALIBRATE ♾️",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        )
+                    }
+                }
+            }
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1F13)),
@@ -455,10 +529,11 @@ fun SettingsScreen(
                     Button(
                         onClick = {
                             onExportLogsCsv()
-                            Toast.makeText(context, "Exporting captured node logs to CSV...", Toast.LENGTH_SHORT).show()
+                            csvExportLauncher.launch("rf_spectrum_radar_log_${System.currentTimeMillis()}.csv")
                         },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                             .testTag("settings_export_csv_button"),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF66)),
                         shape = RoundedCornerShape(8.dp)
@@ -466,7 +541,7 @@ fun SettingsScreen(
                         Icon(imageVector = Icons.Default.Download, contentDescription = null, tint = Color.Black)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "EXPORT CAPTURED LOGS (CSV / PCAP)",
+                            text = "EXPORT CAPTURED LOGS (CSV / SAF)",
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -478,16 +553,18 @@ fun SettingsScreen(
                     OutlinedButton(
                         onClick = {
                             onExportKmlBreadcrumbs()
-                            Toast.makeText(context, "Exporting GPS Wardriving Breadcrumbs (KML)...", Toast.LENGTH_SHORT).show()
+                            kmlExportLauncher.launch("wardriving_breadcrumbs_${System.currentTimeMillis()}.kml")
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
                         border = BorderStroke(1.dp, Color(0xFF00E5FF)),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Icon(imageVector = Icons.Default.Map, contentDescription = null, tint = Color(0xFF00E5FF))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "EXPORT GPS WARDRIVING BREADCRUMBS (KML)",
+                            text = "EXPORT GPS WARDRIVING BREADCRUMBS (KML / SAF)",
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -501,7 +578,9 @@ fun SettingsScreen(
                             onPurgeHistory()
                             Toast.makeText(context, "Captured interception history purged.", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp),
                         border = BorderStroke(1.dp, Color(0xFFFF3366)),
                         shape = RoundedCornerShape(8.dp)
                     ) {

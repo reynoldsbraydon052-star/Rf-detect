@@ -60,10 +60,13 @@ class OrientationManager(
                 var azimuthDeg = Math.toDegrees(azimuthRad.toDouble()).toFloat()
                 if (azimuthDeg < 0) azimuthDeg += 360f
 
-                // Smooth out heading jitter
-                val delta = abs(azimuthDeg - currentHeading)
-                if (delta > 0.5f) {
-                    currentHeading = currentHeading * 0.8f + azimuthDeg * 0.2f
+                // Smooth out heading jitter using shortest path angle interpolation
+                var angleDiff = azimuthDeg - currentHeading
+                while (angleDiff < -180f) angleDiff += 360f
+                while (angleDiff > 180f) angleDiff -= 360f
+
+                if (abs(angleDiff) > 0.3f) {
+                    currentHeading = (currentHeading + angleDiff * 0.25f + 360f) % 360f
                     onHeadingChanged(currentHeading)
                 }
             }

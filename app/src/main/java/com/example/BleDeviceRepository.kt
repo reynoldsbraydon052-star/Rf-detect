@@ -94,11 +94,16 @@ class BleDeviceRepository(private val bleDeviceDao: BleDeviceDao) {
             csPhaseQualityIndex = csPhaseQuality,
             csEstimatedAccuracyMeters = csAccuracy,
             csRttTimeOfFlightNs = csRttNs,
-            csChannelCount = csChannels
+            csChannelCount = csChannels,
+            catalogueTag = existing?.catalogueTag ?: "Uncategorized"
         )
 
         bleDeviceDao.upsertBleDevice(updatedEntity)
         onDeviceScannedListener?.invoke(updatedEntity, existing == null)
+    }
+
+    suspend fun updateCatalogueTag(macAddress: String, tag: String) {
+        bleDeviceDao.updateCatalogueTag(macAddress, tag)
     }
 
     suspend fun clearDatabase() {

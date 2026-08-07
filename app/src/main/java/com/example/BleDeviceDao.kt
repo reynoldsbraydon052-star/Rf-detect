@@ -25,4 +25,7 @@ interface BleDeviceDao {
 
     @Query("DELETE FROM ble_devices WHERE macAddress = :macAddress")
     suspend fun deleteBleDevice(macAddress: String)
+
+    @Query("UPDATE ble_devices SET catalogueTag = :tag WHERE macAddress = :macAddress")
+    suspend fun updateCatalogueTag(macAddress: String, tag: String)
 }

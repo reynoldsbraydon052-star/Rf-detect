@@ -44,6 +44,7 @@ fun BleDatabaseTrackerCard(
     onDeleteDevice: (String) -> Unit,
     onSelectTargetDevice: (String) -> Unit = {},
     onPlayTestPing: (Double) -> Unit = {},
+    onUpdateCatalogueTag: (macAddress: String, tag: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -293,7 +294,8 @@ fun BleDatabaseTrackerCard(
                             isAudioSonarActive = isAudioSonarActive,
                             onToggleAudioLock = { onSelectTargetDevice(device.macAddress) },
                             onPlayTestPing = { onPlayTestPing(device.distanceMeters.toDouble()) },
-                            onDelete = { onDeleteDevice(device.macAddress) }
+                            onDelete = { onDeleteDevice(device.macAddress) },
+                            onUpdateCatalogueTag = { tag -> onUpdateCatalogueTag(device.macAddress, tag) }
                         )
                     }
                 }
@@ -309,7 +311,8 @@ fun BleDeviceRoomTile(
     isAudioSonarActive: Boolean = false,
     onToggleAudioLock: () -> Unit = {},
     onPlayTestPing: () -> Unit = {},
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onUpdateCatalogueTag: (String) -> Unit = {}
 ) {
     val proximityColor = when (device.proximityCategory) {
         "MICRO_PERIMETER" -> Color(0xFFFF3366)
@@ -617,6 +620,47 @@ fun BleDeviceRoomTile(
                     ),
                     color = Color.LightGray
                 )
+            }
+
+            // Custom User Catalogue Tagging
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "CUSTOM CATALOGUE PROFILE TAG: ${device.catalogueTag.uppercase()}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color(0xFF00E5FF)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val catalogTags = listOf("Home Router", "Tracker", "Beacon", "Vehicle BT", "Suspicious")
+                    catalogTags.forEach { tag ->
+                        val isTagSelected = device.catalogueTag.equals(tag, ignoreCase = true)
+                        FilterChip(
+                            selected = isTagSelected,
+                            onClick = { onUpdateCatalogueTag(if (isTagSelected) "Uncategorized" else tag) },
+                            label = {
+                                Text(
+                                    tag,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF00E5FF),
+                                selectedLabelColor = Color.Black
+                            ),
+                            modifier = Modifier.height(24.dp)
+                        )
+                    }
+                }
             }
         }
     }

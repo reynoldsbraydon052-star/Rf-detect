@@ -161,6 +161,37 @@ class ScannerBackgroundAlertService : Service() {
             }
         }
 
+        fun updateForegroundTelemetry(
+            context: Context,
+            activeAntennas: Int,
+            activeNodes: Int,
+            nearestTargetDistMeters: Float
+        ) {
+            if (!isServiceRunning) return
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            val notificationIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context, 0, notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val telemetryText = "📡 Antennas: $activeAntennas | 🎯 Nodes: $activeNodes | 📏 Nearest: %.1fm".format(nearestTargetDistMeters)
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle("RF Spectrum Radar • Background Scan Engine")
+                .setContentText(telemetryText)
+                .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            notificationManager.notify(NOTIFICATION_ID_FOREGROUND, notification)
+        }
+
         fun clearNotifiedHistory() {
             notifiedMacAddresses.clear()
         }

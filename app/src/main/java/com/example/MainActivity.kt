@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.net.Uri
 import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -23,6 +24,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -198,6 +202,7 @@ fun TacticalRadarTheme(content: @Composable () -> Unit) {
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     val permissionsList = remember {
@@ -244,6 +249,13 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
         if (showHardwareDocOverlay) {
             HardwareDocumentationOverlayDialog(
                 onDismiss = { showHardwareDocOverlay = false }
+            )
+        }
+
+        if (uiState.isFigureEightCalibrationActive) {
+            FigureEightCalibrationDialog(
+                onDismiss = { viewModel.closeFigureEightCalibration() },
+                onCalibrationComplete = { score -> viewModel.completeFigureEightCalibration(score) }
             )
         }
 
@@ -462,16 +474,63 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                                     )
                                 }
                             }
-                            IconButton(
-                                onClick = { viewModel.dismissDeviceAlert(alert.id) },
-                                modifier = Modifier.size(28.dp).testTag("dismiss_device_alert_button")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Dismiss Alert",
-                                    tint = Color.LightGray,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Button(
+                                    onClick = { viewModel.turnOffMatchedSignalAlerts() },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFFF2A55).copy(alpha = 0.2f),
+                                        contentColor = Color(0xFFFF2A55)
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.testTag("turn_off_matched_alerts_button")
+                                ) {
+                                    Text(
+                                        text = "TURN OFF",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp
+                                        )
+                                    )
+                                }
+
+                                if (uiState.activeDeviceAlerts.size > 1) {
+                                    Button(
+                                        onClick = { viewModel.dismissAllDeviceAlerts() },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.White.copy(alpha = 0.15f),
+                                            contentColor = Color.White
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.testTag("clear_all_matched_alerts_button")
+                                    ) {
+                                        Text(
+                                            text = "CLEAR ALL (${uiState.activeDeviceAlerts.size})",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 9.sp
+                                            )
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { viewModel.dismissDeviceAlert(alert.id) },
+                                    modifier = Modifier.size(28.dp).testTag("dismiss_device_alert_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss Alert",
+                                        tint = Color.LightGray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -494,7 +553,9 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onToggleMaximizeMap = { viewModel.toggleMapMaximized() },
                             onOpenFullScreenMap = { viewModel.toggleFullScreenMap(true) },
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
-                            onPlayTestPing = { viewModel.playTestAudioPing(it) }
+                            onPlayTestPing = { viewModel.playTestAudioPing(it) },
+                            onOpenCalibration = { viewModel.openFigureEightCalibration() },
+                            onUpdateBleCatalogueTag = { mac, tag -> viewModel.updateBleCatalogueTag(mac, tag) }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -531,7 +592,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                                 viewModel.selectTargetDevice(targetId)
                                 viewModel.setFullScreenMapMode("AR")
                                 viewModel.toggleFullScreenMap(true)
-                            }
+                            },
+                            onOpenCalibration = { viewModel.openFigureEightCalibration() }
                         )
 
                         RadarTab.DETECTED_SENSORS -> DetectedSensorsScreen(
@@ -547,7 +609,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             uiState = uiState,
                             onRecalibrate = { viewModel.recalibrateMagnetometer() },
                             onTriggerSpike = { viewModel.triggerRfSpike() },
-                            onClearInterference = { viewModel.clearRfInterference() }
+                            onClearInterference = { viewModel.clearRfInterference() },
+                            onExportAcousticReportUri = { uri -> viewModel.writeAcousticReportToUri(context, uri) }
                         )
 
                         RadarTab.SECURITY_GUARD -> SecurityGuardScreen(
@@ -558,7 +621,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
 
                         RadarTab.CSV_LOG_CONSOLE -> CsvLogConsoleScreen(
                             uiState = uiState,
-                            onClearLogs = { viewModel.clearLogHistory() }
+                            onClearLogs = { viewModel.clearLogHistory() },
+                            onExportCsvUri = { uri -> viewModel.writeLogsToUri(context, uri) }
                         )
 
                         RadarTab.SETTINGS -> SettingsScreen(
@@ -575,7 +639,10 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSetScanMode = { viewModel.setScanMode(it) },
                             onExportLogsCsv = { viewModel.exportCapturedLogsCsv() },
                             onExportKmlBreadcrumbs = { viewModel.exportGpsBreadcrumbsKml() },
-                            onPurgeHistory = { viewModel.purgeInterceptionHistory() }
+                            onExportLogsCsvUri = { uri -> viewModel.writeLogsToUri(context, uri) },
+                            onExportKmlBreadcrumbsUri = { uri -> viewModel.writeKmlToUri(context, uri) },
+                            onPurgeHistory = { viewModel.purgeInterceptionHistory() },
+                            onOpenCalibration = { viewModel.openFigureEightCalibration() }
                         )
                     }
                 }
@@ -947,6 +1014,7 @@ fun QuickControlsCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SweepRadarScreen(
     uiState: SignalRadarUiState,
@@ -964,9 +1032,12 @@ fun SweepRadarScreen(
     onOpenFullScreenMap: () -> Unit = {},
     onSelectTargetDevice: (String?) -> Unit = {},
     onPlayTestPing: (Double) -> Unit = {},
+    onOpenCalibration: () -> Unit = {},
+    onUpdateBleCatalogueTag: (String, String) -> Unit = { _, _ -> },
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
+    var showControlBottomSheet by remember { mutableStateOf(false) }
 
     if (windowSizeClass.isExpandedOrLandscape) {
         // Landscape or Wide Screen Two-Column Alignment Layout
@@ -1049,7 +1120,8 @@ fun SweepRadarScreen(
                 CompassDeviceFinderCard(
                     uiState = uiState,
                     onSelectTargetDevice = onSelectTargetDevice,
-                    onToggleAudioSonar = onToggleAudioSonar
+                    onToggleAudioSonar = onToggleAudioSonar,
+                    onOpenCalibration = onOpenCalibration
                 )
 
                 QuickControlsCard(
@@ -1068,12 +1140,13 @@ fun SweepRadarScreen(
                     onClearDatabase = onClearBleDb,
                     onDeleteDevice = onDeleteBleDevice,
                     onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
-                    onPlayTestPing = onPlayTestPing
+                    onPlayTestPing = onPlayTestPing,
+                    onUpdateCatalogueTag = onUpdateBleCatalogueTag
                 )
             }
         }
     } else {
-        // Portrait / Compact Column Layout
+        // Portrait / Compact Column Layout with ModalBottomSheet for controls to avoid squishing
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1136,37 +1209,101 @@ fun SweepRadarScreen(
                 }
             }
 
-            Column(
+            // Bottom Bar Button to trigger ModalBottomSheet Controls
+            Button(
+                onClick = { showControlBottomSheet = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 240.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .height(48.dp)
+                    .testTag("open_tactical_controls_sheet"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
             ) {
-                CompassDeviceFinderCard(
-                    uiState = uiState,
-                    onSelectTargetDevice = onSelectTargetDevice,
-                    onToggleAudioSonar = onToggleAudioSonar
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = "Controls",
+                    modifier = Modifier.size(18.dp)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "EXPAND TACTICAL CONTROLS & BLE TRACKER (3 CARDS)",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                )
+            }
+        }
 
-                QuickControlsCard(
-                    uiState = uiState,
-                    onToggleAudioSonar = onToggleAudioSonar,
-                    onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                    onToggleScanning = onToggleScanning
-                )
+        if (showControlBottomSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showControlBottomSheet = false },
+                containerColor = Color(0xFF060F0B),
+                contentColor = Color.White,
+                scrimColor = Color.Black.copy(alpha = 0.7f),
+                modifier = Modifier.testTag("tactical_controls_modal_sheet")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "TACTICAL CONTROLS & BLE TRACKER",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        IconButton(onClick = { showControlBottomSheet = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color.White
+                            )
+                        }
+                    }
 
-                BleDatabaseTrackerCard(
-                    bleDevices = uiState.savedBleDevices,
-                    isScannerActive = uiState.isBleScannerServiceActive,
-                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                    isAudioSonarActive = uiState.isAudioSonarActive,
-                    onToggleScanner = onToggleBleScanner,
-                    onClearDatabase = onClearBleDb,
-                    onDeleteDevice = onDeleteBleDevice,
-                    onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
-                    onPlayTestPing = onPlayTestPing
-                )
+                    CompassDeviceFinderCard(
+                        uiState = uiState,
+                        onSelectTargetDevice = onSelectTargetDevice,
+                        onToggleAudioSonar = onToggleAudioSonar,
+                        onOpenCalibration = onOpenCalibration
+                    )
+
+                    QuickControlsCard(
+                        uiState = uiState,
+                        onToggleAudioSonar = onToggleAudioSonar,
+                        onTogglePerimeterAlarm = onTogglePerimeterAlarm,
+                        onToggleScanning = onToggleScanning
+                    )
+
+                    BleDatabaseTrackerCard(
+                        bleDevices = uiState.savedBleDevices,
+                        isScannerActive = uiState.isBleScannerServiceActive,
+                        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                        isAudioSonarActive = uiState.isAudioSonarActive,
+                        onToggleScanner = onToggleBleScanner,
+                        onClearDatabase = onClearBleDb,
+                        onDeleteDevice = onDeleteBleDevice,
+                        onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
+                        onPlayTestPing = onPlayTestPing,
+                        onUpdateCatalogueTag = onUpdateBleCatalogueTag
+                    )
+                }
             }
         }
     }
@@ -1177,7 +1314,7 @@ fun FilterChipsRow(
     selectedFilter: String,
     onFilterSelected: (String) -> Unit
 ) {
-    val filters = listOf("ALL", "WIFI", "CELLULAR", "BLE", "MAGNETIC", "AUDIO")
+    val filters = listOf("ALL", "WIFI", "CELLULAR", "BLE", "MAGNETIC", "AUDIO", "OFF")
 
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1185,23 +1322,41 @@ fun FilterChipsRow(
     ) {
         items(filters) { filter ->
             val isSelected = filter == selectedFilter
+            val isOffChip = filter == "OFF"
+
+            val containerColor = when {
+                isSelected && isOffChip -> Color(0xFFFF2A55).copy(alpha = 0.25f)
+                isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+
+            val strokeColor = when {
+                isSelected && isOffChip -> Color(0xFFFF2A55)
+                isSelected -> MaterialTheme.colorScheme.primary
+                else -> Color.Transparent
+            }
+
+            val textColor = when {
+                isSelected && isOffChip -> Color(0xFFFF2A55)
+                isSelected -> MaterialTheme.colorScheme.primary
+                isOffChip -> Color(0xFFFF2A55).copy(alpha = 0.6f)
+                else -> Color.Gray
+            }
+
             Surface(
                 onClick = { onFilterSelected(filter) },
                 shape = RoundedCornerShape(8.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(
-                    1.dp,
-                    if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-                ),
+                color = containerColor,
+                border = BorderStroke(1.dp, strokeColor),
                 modifier = Modifier.testTag("filter_chip_$filter")
             ) {
                 Text(
-                    text = filter,
+                    text = if (isOffChip) "OFF (MUTE ALL)" else filter,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     ),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                    color = textColor,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
@@ -1349,12 +1504,14 @@ fun PinpointDeviceHUDCard(
     uiState: SignalRadarUiState,
     onUnlockTarget: () -> Unit,
     onToggleAudioSonar: () -> Unit,
+    onOpenCalibration: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     CompassDeviceFinderCard(
         uiState = uiState,
         onSelectTargetDevice = { id -> if (id == null) onUnlockTarget() },
         onToggleAudioSonar = onToggleAudioSonar,
+        onOpenCalibration = onOpenCalibration,
         modifier = modifier
     )
 }
@@ -1534,6 +1691,7 @@ fun SpectrumAnalyzerScreen(
     onSelectTargetDevice: (String?) -> Unit = {},
     onToggleAudioSonar: () -> Unit = {},
     onOpenArCameraForTarget: (String) -> Unit = {},
+    onOpenCalibration: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -1556,7 +1714,8 @@ fun SpectrumAnalyzerScreen(
                     PinpointDeviceHUDCard(
                         uiState = uiState,
                         onUnlockTarget = { onSelectTargetDevice(null) },
-                        onToggleAudioSonar = onToggleAudioSonar
+                        onToggleAudioSonar = onToggleAudioSonar,
+                        onOpenCalibration = onOpenCalibration
                     )
                 }
                 RealTimeSignalStrengthChartCard(
@@ -1566,7 +1725,11 @@ fun SpectrumAnalyzerScreen(
                     onOpenArCameraForTarget = onOpenArCameraForTarget
                 )
                 PhoneAntennaArrayCard(telemetryList = uiState.antennaArrayTelemetry)
-                LargeSpectrumVisualizerCard(activeBlips = uiState.activeBlips)
+                LargeSpectrumVisualizerCard(
+                    activeBlips = uiState.activeBlips,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    onSelectTargetDevice = onSelectTargetDevice
+                )
             }
 
             Column(
@@ -1616,7 +1779,8 @@ fun SpectrumAnalyzerScreen(
                     PinpointDeviceHUDCard(
                         uiState = uiState,
                         onUnlockTarget = { onSelectTargetDevice(null) },
-                        onToggleAudioSonar = onToggleAudioSonar
+                        onToggleAudioSonar = onToggleAudioSonar,
+                        onOpenCalibration = onOpenCalibration
                     )
                 }
             }
@@ -1642,7 +1806,11 @@ fun SpectrumAnalyzerScreen(
             }
 
             item {
-                LargeSpectrumVisualizerCard(activeBlips = uiState.activeBlips)
+                LargeSpectrumVisualizerCard(
+                    activeBlips = uiState.activeBlips,
+                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+                    onSelectTargetDevice = onSelectTargetDevice
+                )
             }
 
             item {
@@ -1673,10 +1841,16 @@ fun MagnetometerScreen(
     uiState: SignalRadarUiState,
     onRecalibrate: () -> Unit = {},
     onTriggerSpike: () -> Unit = {},
-    onClearInterference: () -> Unit = {}
+    onClearInterference: () -> Unit = {},
+    onExportAcousticReportUri: (Uri) -> Unit = {}
 ) {
     val mag = uiState.magnetometerData
     val acoustic = uiState.acousticData
+    val reportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        uri?.let { onExportAcousticReportUri(it) }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -2220,6 +2394,35 @@ fun MagnetometerScreen(
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = Color.Gray
                     )
+
+                    Button(
+                        onClick = {
+                            reportLauncher.launch("acoustic_fft_spectrogram_report_${System.currentTimeMillis()}.txt")
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("export_acoustic_spectrogram_report_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFFCC00),
+                            contentColor = Color.Black
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Export Acoustic Spectrogram Report",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "EXPORT ACOUSTIC SPECTROGRAM REPORT (18-22 kHz)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -2345,9 +2548,15 @@ fun SecurityGuardScreen(
 @Composable
 fun CsvLogConsoleScreen(
     uiState: SignalRadarUiState,
-    onClearLogs: () -> Unit
+    onClearLogs: () -> Unit,
+    onExportCsvUri: (android.net.Uri) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val createCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let { onExportCsvUri(it) }
+    }
 
     Column(
         modifier = Modifier
@@ -2371,7 +2580,7 @@ fun CsvLogConsoleScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 TextButton(
                     onClick = {
-                        Toast.makeText(context, "CSV exported to internal file storage", Toast.LENGTH_SHORT).show()
+                        createCsvLauncher.launch("rf_spectrum_radar_log_${System.currentTimeMillis()}.csv")
                     }
                 ) {
                     Icon(
@@ -4255,10 +4464,10 @@ fun SpatialD3HeatmapCanvas(
 
 @Composable
 fun rememberFilteredBlips(blips: List<RadarBlip>, filterType: String): List<RadarBlip> {
-    return if (filterType == "ALL") {
-        blips
-    } else {
-        blips.filter { it.type.equals(filterType, ignoreCase = true) }
+    return when {
+        filterType.equals("OFF", ignoreCase = true) || filterType.equals("NONE", ignoreCase = true) -> emptyList()
+        filterType == "ALL" -> blips
+        else -> blips.filter { it.type.equals(filterType, ignoreCase = true) }
     }
 }
 

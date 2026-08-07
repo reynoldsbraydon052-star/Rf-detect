@@ -1,5 +1,7 @@
 package com.example
 
+import kotlin.math.*
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -13,11 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CellTower
-import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.Radar
-import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.SettingsInputAntenna
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,14 +26,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlin.math.log10
+import kotlin.math.max
 import kotlin.math.sin
 
 data class PhoneFrequencyBand(
@@ -201,24 +203,100 @@ object PhoneSpectrumDatabase {
     )
 }
 
+data class SweepChannel(
+    val channelName: String,
+    val bandName: String,
+    val centerFreqMhz: Double,
+    val bandwidthMhz: Double,
+    val category: String, // "WIFI_2G4", "BLE", "WIFI_5G"
+    val color: Color
+)
+
+object CommonFrequencyChannels {
+    val CHANNELS = listOf(
+        // Wi-Fi 2.4 GHz Channels
+        SweepChannel("Wi-Fi Ch 1", "2.4 GHz ISM", 2412.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+        SweepChannel("Wi-Fi Ch 3", "2.4 GHz ISM", 2422.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+        SweepChannel("Wi-Fi Ch 6", "2.4 GHz ISM", 2437.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+        SweepChannel("Wi-Fi Ch 9", "2.4 GHz ISM", 2452.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+        SweepChannel("Wi-Fi Ch 11", "2.4 GHz ISM", 2462.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+        SweepChannel("Wi-Fi Ch 13", "2.4 GHz ISM", 2472.0, 22.0, "WIFI_2G4", Color(0xFF76FF03)),
+
+        // Bluetooth LE Channels
+        SweepChannel("BLE Adv Ch 37", "Bluetooth LE", 2402.0, 4.0, "BLE", Color(0xFF00E5FF)),
+        SweepChannel("BLE Adv Ch 38", "Bluetooth LE", 2426.0, 4.0, "BLE", Color(0xFF00E5FF)),
+        SweepChannel("BLE Adv Ch 39", "Bluetooth LE", 2480.0, 4.0, "BLE", Color(0xFF00E5FF)),
+        SweepChannel("BLE Data Ch 10", "Bluetooth LE", 2422.0, 4.0, "BLE", Color(0xFF00E5FF)),
+        SweepChannel("BLE Data Ch 20", "Bluetooth LE", 2442.0, 4.0, "BLE", Color(0xFF00E5FF)),
+        SweepChannel("BLE Data Ch 30", "Bluetooth LE", 2462.0, 4.0, "BLE", Color(0xFF00E5FF)),
+
+        // Wi-Fi 5 GHz UNII Channels
+        SweepChannel("Wi-Fi Ch 36", "5.0 GHz UNII-1", 5180.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 40", "5.0 GHz UNII-1", 5200.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 44", "5.0 GHz UNII-1", 5220.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 48", "5.0 GHz UNII-1", 5240.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 149", "5.0 GHz UNII-3", 5745.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 157", "5.0 GHz UNII-3", 5785.0, 40.0, "WIFI_5G", Color(0xFF18FFFF)),
+        SweepChannel("Wi-Fi Ch 161", "5.0 GHz UNII-3", 5805.0, 40.0, "WIFI_5G", Color(0xFF18FFFF))
+    )
+}
+
 @Composable
 fun LargeSpectrumVisualizerCard(
     activeBlips: List<RadarBlip>,
+    selectedTargetDeviceId: String? = null,
+    onSelectTargetDevice: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedBandFilter by remember { mutableStateOf("ALL") }
     var isLogarithmicScale by remember { mutableStateOf(true) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "spectrum_sweep")
-    val sweepProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sweep_line"
-    )
+    // Automatic Frequency Sweep Controls State
+    var isFrequencySweepActive by remember { mutableStateOf(true) }
+    var sweepCategoryFilter by remember { mutableStateOf("ALL") } // "ALL", "WIFI_2G4", "BLE", "WIFI_5G"
+    var sweepSpeedMs by remember { mutableStateOf(1500L) } // 1.0s, 1.5s, 3.0s
+    var currentSweepChannelIndex by remember { mutableIntStateOf(0) }
+
+    // Peak Hold Data Map: Freq Bin Index -> Max RSSI (0.0f..1.0f)
+    val peakHoldArray = remember { mutableStateMapOf<Int, Float>() }
+
+    // Filter available sweep channels based on sweepCategoryFilter
+    val activeSweepChannels = remember(sweepCategoryFilter) {
+        if (sweepCategoryFilter == "ALL") {
+            CommonFrequencyChannels.CHANNELS
+        } else {
+            CommonFrequencyChannels.CHANNELS.filter { it.category == sweepCategoryFilter }
+        }
+    }
+
+    // Step through channels automatically when sweep is active
+    LaunchedEffect(isFrequencySweepActive, sweepCategoryFilter, sweepSpeedMs, activeSweepChannels.size) {
+        if (isFrequencySweepActive && activeSweepChannels.isNotEmpty()) {
+            while (true) {
+                delay(sweepSpeedMs)
+                currentSweepChannelIndex = (currentSweepChannelIndex + 1) % activeSweepChannels.size
+            }
+        }
+    }
+
+    val currentChannel = remember(currentSweepChannelIndex, activeSweepChannels) {
+        if (activeSweepChannels.isNotEmpty()) {
+            activeSweepChannels[currentSweepChannelIndex.coerceIn(0, activeSweepChannels.size - 1)]
+        } else {
+            CommonFrequencyChannels.CHANNELS[0]
+        }
+    }
+
+    // Active blips in the current sweep channel
+    val activeBlipsInCurrentChannel = remember(activeBlips, currentChannel) {
+        activeBlips.filter { blip ->
+            abs(blip.frequencyMhz - currentChannel.centerFreqMhz) <= (currentChannel.bandwidthMhz / 1.5)
+        }
+    }
+
+    val maxRssiInCurrentChannel = remember(activeBlipsInCurrentChannel) {
+        activeBlipsInCurrentChannel.maxOfOrNull { it.rssi } ?: -95
+    }
 
     val displayedBands = remember(selectedBandFilter) {
         if (selectedBandFilter == "ALL") {
@@ -240,7 +318,7 @@ fun LargeSpectrumVisualizerCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header Row
+            // Header Row: Title & Scale Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -258,7 +336,7 @@ fun LargeSpectrumVisualizerCard(
                     )
                     Column {
                         Text(
-                            text = "FULL PHONE ANTENNA SPECTRUM (13.5MHz - 39.5GHz)",
+                            text = "AUTOMATIC FREQUENCY SWEEP & SPECTRUM",
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Black,
                                 fontFamily = FontFamily.Monospace,
@@ -267,14 +345,17 @@ fun LargeSpectrumVisualizerCard(
                             color = Color(0xFF00FF66)
                         )
                         Text(
-                            text = "10 All-Band Phone Hardware Radio Receptors Active",
+                            text = "Auto-cycling Wi-Fi / BLE channels • Peak Intercept Tracking",
                             style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                             color = Color.Gray
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     FilterChip(
                         selected = isLogarithmicScale,
                         onClick = { isLogarithmicScale = !isLogarithmicScale },
@@ -292,7 +373,201 @@ fun LargeSpectrumVisualizerCard(
                 }
             }
 
-            // Band Filter Chips
+            // Frequency Sweep Control Panel Row
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF07140B),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Sweep Toggle Play/Pause
+                        Button(
+                            onClick = { isFrequencySweepActive = !isFrequencySweepActive },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isFrequencySweepActive) Color(0xFF00FF66) else Color(0xFF223A2A),
+                                contentColor = if (isFrequencySweepActive) Color.Black else Color(0xFF00FF66)
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isFrequencySweepActive) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = "Toggle Sweep",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isFrequencySweepActive) "SWEEP ACTIVE" else "PAUSED",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+
+                        // Sweep Speed Selector
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "DWELL:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp
+                                ),
+                                color = Color.Gray
+                            )
+
+                            listOf(1000L to "1s", 1500L to "1.5s", 3000L to "3s").forEach { (speedMs, label) ->
+                                val isSelected = sweepSpeedMs == speedMs
+                                Surface(
+                                    onClick = { sweepSpeedMs = speedMs },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.3f) else Color(0xFF12281B),
+                                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF00FF66) else Color.Transparent)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 9.5.sp
+                                        ),
+                                        color = if (isSelected) Color(0xFF00FF66) else Color.LightGray,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Reset Peak Hold
+                        TextButton(
+                            onClick = { peakHoldArray.clear() },
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Clear Peak Hold",
+                                tint = Color.Yellow,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "CLEAR PEAKS",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp,
+                                    color = Color.Yellow
+                                )
+                            )
+                        }
+                    }
+
+                    // Channel Filter Sub-Chips (ALL, Wi-Fi 2.4G, BLE, Wi-Fi 5G)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "SWEEP BAND:",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            ),
+                            color = Color.Gray
+                        )
+
+                        listOf(
+                            "ALL" to "ALL CHANNELS",
+                            "WIFI_2G4" to "Wi-Fi 2.4G",
+                            "BLE" to "BLE 0-39",
+                            "WIFI_5G" to "Wi-Fi 5G"
+                        ).forEach { (catKey, catLabel) ->
+                            val isSel = sweepCategoryFilter == catKey
+                            Surface(
+                                onClick = {
+                                    sweepCategoryFilter = catKey
+                                    currentSweepChannelIndex = 0
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSel) Color(0xFF00FF66) else Color(0xFF0F2618),
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = catLabel,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.sp
+                                    ),
+                                    color = if (isSel) Color.Black else Color(0xFF00FF66),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Current Swept Channel HUD Status Banner
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0B2114))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isFrequencySweepActive) Color(0xFF00FF66) else Color.Gray)
+                            )
+                            Text(
+                                text = "CURRENTLY SWEEPING: ${currentChannel.channelName} (${currentChannel.centerFreqMhz.toInt()} MHz)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.5.sp
+                                ),
+                                color = Color.White
+                            )
+                        }
+
+                        Text(
+                            text = if (activeBlipsInCurrentChannel.isNotEmpty())
+                                "⚡ ${activeBlipsInCurrentChannel.size} PEAKS DETECTED ($maxRssiInCurrentChannel dBm)"
+                            else "SCANNING...",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.5.sp
+                            ),
+                            color = if (activeBlipsInCurrentChannel.isNotEmpty()) Color.Yellow else Color.Gray
+                        )
+                    }
+                }
+            }
+
+            // Band Filter Chips (General Antenna Filter)
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -332,11 +607,11 @@ fun LargeSpectrumVisualizerCard(
                 }
             }
 
-            // Spectrum Waterfall Canvas Graph
+            // Spectrum Waterfall & Frequency Sweep Canvas Graph
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF060D0A))
                     .border(1.dp, Color(0xFF1B3D2B), RoundedCornerShape(12.dp))
@@ -405,9 +680,40 @@ fun LargeSpectrumVisualizerCard(
                         )
                     }
 
-                    // Draw Simulated/Live Frequency Power Spectrum Line
-                    val path = Path()
-                    val steps = 200
+                    // Highlight Currently Swept Channel Zone on Canvas
+                    val channelStartX = getXForFreq(currentChannel.centerFreqMhz - (currentChannel.bandwidthMhz / 2.0))
+                    val channelEndX = getXForFreq(currentChannel.centerFreqMhz + (currentChannel.bandwidthMhz / 2.0)).coerceAtLeast(channelStartX + 12f)
+                    val channelWidth = (channelEndX - channelStartX).coerceAtLeast(10f)
+
+                    // Swept Channel Vertical Highlight Pillar
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(currentChannel.color.copy(alpha = 0.45f), currentChannel.color.copy(alpha = 0.08f))
+                        ),
+                        topLeft = Offset(channelStartX, 0f),
+                        size = Size(channelWidth, h)
+                    )
+
+                    drawLine(
+                        color = currentChannel.color,
+                        start = Offset(channelStartX, 0f),
+                        end = Offset(channelStartX, h),
+                        strokeWidth = 1.5f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                    )
+                    drawLine(
+                        color = currentChannel.color,
+                        start = Offset(channelEndX, 0f),
+                        end = Offset(channelEndX, h),
+                        strokeWidth = 1.5f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                    )
+
+                    // Draw Live Spectrum Trace Line & Calculate Peak Hold
+                    val livePath = Path()
+                    val peakPath = Path()
+                    val steps = 220
+
                     for (i in 0..steps) {
                         val normX = i / steps.toFloat()
                         val freqMhz = if (isLogarithmicScale) {
@@ -417,31 +723,55 @@ fun LargeSpectrumVisualizerCard(
                         }
 
                         val currentX = normX * w
-                        // Noise baseline + carrier peaks
-                        var powerNorm = 0.15f + (sin(normX * 30f + sweepProgress * 6.28f) * 0.05f).toFloat()
 
-                        // Add peaks for active bands
+                        // Baseline background noise
+                        var powerNorm = 0.12f + (sin(normX * 35f) * 0.04f).toFloat()
+
+                        // Add peaks for hardware antenna coverage
                         PhoneSpectrumDatabase.ALL_PHONE_BANDS.forEach { band ->
                             if (freqMhz >= band.startFreqMhz * 0.95 && freqMhz <= band.endFreqMhz * 1.05) {
                                 val centerFreq = (band.startFreqMhz + band.endFreqMhz) / 2.0
-                                val delta = Math.abs(freqMhz - centerFreq) / (band.endFreqMhz - band.startFreqMhz + 1.0)
-                                val peakFactor = Math.max(0.0, 1.0 - delta * 2.0).toFloat()
-                                powerNorm += peakFactor * 0.65f
+                                val delta = abs(freqMhz - centerFreq) / (band.endFreqMhz - band.startFreqMhz + 1.0)
+                                val peakFactor = max(0.0, 1.0 - delta * 2.0).toFloat()
+                                powerNorm += peakFactor * 0.25f
                             }
                         }
 
-                        val y = h * (1.0f - powerNorm.coerceIn(0.05f, 0.95f))
+                        // Add live real-time peaks from active blips
+                        activeBlips.forEach { blip ->
+                            val freqDelta = abs(freqMhz - blip.frequencyMhz)
+                            val normalizedRssi = ((blip.rssi + 100) / 70f).coerceIn(0.1f, 1.0f)
+
+                            if (freqDelta < 80.0) {
+                                val proximityFactor = (1.0 - (freqDelta / 80.0)).toFloat()
+                                powerNorm += normalizedRssi * proximityFactor * 0.65f
+                            }
+                        }
+
+                        val finalPower = powerNorm.coerceIn(0.05f, 0.95f)
+
+                        // Update Peak Hold Array
+                        val existingPeak = peakHoldArray[i] ?: 0f
+                        if (finalPower > existingPeak) {
+                            peakHoldArray[i] = finalPower
+                        }
+                        val peakPower = max(existingPeak, finalPower)
+
+                        val yLive = h * (1.0f - finalPower)
+                        val yPeak = h * (1.0f - peakPower)
 
                         if (i == 0) {
-                            path.moveTo(currentX, y)
+                            livePath.moveTo(currentX, yLive)
+                            peakPath.moveTo(currentX, yPeak)
                         } else {
-                            path.lineTo(currentX, y)
+                            livePath.lineTo(currentX, yLive)
+                            peakPath.lineTo(currentX, yPeak)
                         }
                     }
 
-                    // Fill under path
+                    // Fill under live path
                     val fillPath = Path().apply {
-                        addPath(path)
+                        addPath(livePath)
                         lineTo(w, h)
                         lineTo(0f, h)
                         close()
@@ -450,52 +780,70 @@ fun LargeSpectrumVisualizerCard(
                     drawPath(
                         path = fillPath,
                         brush = Brush.verticalGradient(
-                            colors = listOf(Color(0xFF00FF66).copy(alpha = 0.35f), Color.Transparent),
+                            colors = listOf(Color(0xFF00FF66).copy(alpha = 0.30f), Color.Transparent),
                             startY = 0f,
                             endY = h
                         )
                     )
 
+                    // Draw Peak Hold Trace (Dashed Gold Curve)
                     drawPath(
-                        path = path,
+                        path = peakPath,
+                        color = Color.Yellow.copy(alpha = 0.8f),
+                        style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f))
+                    )
+
+                    // Draw Live Spectrum Line (Neon Green)
+                    drawPath(
+                        path = livePath,
                         color = Color(0xFF00FF66),
                         style = Stroke(width = 2.5f)
                     )
 
-                    // Draw Live Intercept Blip Markers along spectrum
+                    // Draw Active Intercept Peak Markers & Highlight Callouts
                     activeBlips.forEach { blip ->
                         val blipX = getXForFreq(blip.frequencyMhz)
-                        val blipY = h * 0.35f
+                        val normalizedRssi = ((blip.rssi + 100) / 70f).coerceIn(0.15f, 0.95f)
+                        val blipY = h * (1.0f - normalizedRssi)
 
+                        val isSelected = blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId
+                        val isInCurrentSweepChannel = abs(blip.frequencyMhz - currentChannel.centerFreqMhz) <= (currentChannel.bandwidthMhz / 1.5)
+
+                        val markerColor = when {
+                            isSelected -> Color.Red
+                            isInCurrentSweepChannel -> Color.Yellow
+                            else -> Color(0xFF00E5FF)
+                        }
+
+                        // Vertical Laser Pillar over Peak
+                        drawLine(
+                            color = markerColor.copy(alpha = if (isInCurrentSweepChannel) 0.8f else 0.3f),
+                            start = Offset(blipX, 0f),
+                            end = Offset(blipX, h),
+                            strokeWidth = if (isInCurrentSweepChannel) 2f else 1f
+                        )
+
+                        // Peak Diamond / Circle Marker
                         drawCircle(
-                            color = Color.Yellow,
-                            radius = 6f,
+                            color = markerColor,
+                            radius = if (isInCurrentSweepChannel) 8f else 5f,
                             center = Offset(blipX, blipY)
                         )
                         drawCircle(
-                            color = Color.Yellow.copy(alpha = 0.4f),
-                            radius = 12f,
+                            color = markerColor.copy(alpha = 0.4f),
+                            radius = if (isInCurrentSweepChannel) 16f else 10f,
                             center = Offset(blipX, blipY),
-                            style = Stroke(width = 1.5f)
+                            style = Stroke(width = 2f)
                         )
                     }
 
-                    // Animated Sweep Beam
-                    val sweepX = sweepProgress * w
+                    // Live Animated Sweep Beam Line
+                    val sweepBeamX = getXForFreq(currentChannel.centerFreqMhz)
                     drawLine(
-                        color = Color(0xFF00E5FF),
-                        start = Offset(sweepX, 0f),
-                        end = Offset(sweepX, h),
-                        strokeWidth = 2f
-                    )
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(Color(0xFF00E5FF).copy(alpha = 0.25f), Color.Transparent),
-                            startX = sweepX,
-                            endX = (sweepX + 40f).coerceAtMost(w)
-                        ),
-                        topLeft = Offset(sweepX, 0f),
-                        size = Size(40f, h)
+                        color = Color(0xFF00FF66),
+                        start = Offset(sweepBeamX, 0f),
+                        end = Offset(sweepBeamX, h),
+                        strokeWidth = 3f
                     )
                 }
 
@@ -504,7 +852,7 @@ fun LargeSpectrumVisualizerCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter)
-                        .background(Color.Black.copy(alpha = 0.6f))
+                        .background(Color.Black.copy(alpha = 0.7f))
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -516,7 +864,180 @@ fun LargeSpectrumVisualizerCard(
                 }
             }
 
-            // Detailed List of Displayed Frequency Bands
+            // Scrolling 2D Waterfall Spectral Heatmap Plot
+            Waterfall2DSpectrumCanvas(activeBlips = activeBlips, isLogarithmicScale = isLogarithmicScale)
+
+            // Swept Channel Intercept Peaks Section
+            Text(
+                text = "SWEPT CHANNEL ACTIVE PEAKS SUMMARY",
+                style = MaterialTheme.typography.titleSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // Cards for channels with active detected peaks
+            val channelsWithPeaks = remember(activeBlips) {
+                CommonFrequencyChannels.CHANNELS.map { ch ->
+                    val blipsInCh = activeBlips.filter { blip ->
+                        abs(blip.frequencyMhz - ch.centerFreqMhz) <= (ch.bandwidthMhz / 1.5)
+                    }
+                    ch to blipsInCh
+                }.filter { it.second.isNotEmpty() }
+            }
+
+            if (channelsWithPeaks.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF0A1F13),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Sweeping channels... No active signal peaks detected in swept bands yet.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Color.Gray,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    channelsWithPeaks.forEach { (ch, blips) ->
+                        val maxRssi = blips.maxOfOrNull { it.rssi } ?: -95
+                        val strongestBlip = blips.maxByOrNull { it.rssi }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF091C10),
+                            border = BorderStroke(1.dp, if (ch == currentChannel) Color(0xFF00FF66) else ch.color.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("swept_channel_card_${ch.channelName}")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(ch.color)
+                                    )
+
+                                    Column {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = ch.channelName,
+                                                style = MaterialTheme.typography.titleSmall.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                ),
+                                                color = Color.White
+                                            )
+
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = ch.color.copy(alpha = 0.2f)
+                                            ) {
+                                                Text(
+                                                    text = "${ch.centerFreqMhz.toInt()} MHz",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 9.sp
+                                                    ),
+                                                    color = ch.color,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Text(
+                                            text = "Strongest: ${strongestBlip?.name ?: "Unknown"} • ${blips.size} Active Peaks",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                            color = Color.LightGray
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "PEAK RSSI",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 8.sp
+                                            ),
+                                            color = Color.Gray
+                                        )
+                                        Text(
+                                            text = "$maxRssi dBm",
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.Black,
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            color = Color.Yellow
+                                        )
+                                    }
+
+                                    if (strongestBlip != null) {
+                                        val isTargetLocked = strongestBlip.id == selectedTargetDeviceId
+
+                                        Surface(
+                                            onClick = {
+                                                onSelectTargetDevice(if (isTargetLocked) null else strongestBlip.id)
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isTargetLocked) Color.Red else Color(0xFF14301E),
+                                            border = BorderStroke(1.dp, if (isTargetLocked) Color.Red else Color(0xFF00FF66))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isTargetLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                                    contentDescription = "Lock Device",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                                Text(
+                                                    text = if (isTargetLocked) "LOCKED" else "LOCK",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 9.5.sp
+                                                    ),
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detailed List of Displayed Phone Antenna Frequency Bands
             Text(
                 text = "PHONE ANTENNA BAND REGISTRATION (${displayedBands.size})",
                 style = MaterialTheme.typography.titleSmall.copy(
@@ -622,6 +1143,103 @@ fun PhoneBandDetailTile(band: PhoneFrequencyBand) {
                             color = Color(0xFF00FF66),
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Waterfall2DSpectrumCanvas(
+    activeBlips: List<RadarBlip>,
+    modifier: Modifier = Modifier,
+    isLogarithmicScale: Boolean = true
+) {
+    val frameHistory = remember { mutableStateListOf<FloatArray>() }
+
+    LaunchedEffect(activeBlips.size, activeBlips.firstOrNull()?.rssi) {
+        val numBins = 64
+        val currentBins = FloatArray(numBins)
+        for (i in 0 until numBins) {
+            val freqMhz = 10.0 * (40000.0 / 10.0).pow(i / (numBins - 1.0))
+            val matchingBlip = activeBlips.firstOrNull { abs(it.frequencyMhz - freqMhz) < (freqMhz * 0.15) }
+            val normPower = if (matchingBlip != null) {
+                ((matchingBlip.rssi + 100) / 70f).coerceIn(0.15f, 1.0f)
+            } else {
+                (0.04f + (sin(i * 0.3f + System.currentTimeMillis() * 0.003f) * 0.04f).toFloat())
+            }
+            currentBins[i] = normPower
+        }
+
+        if (frameHistory.size >= 24) {
+            frameHistory.removeAt(frameHistory.size - 1)
+        }
+        frameHistory.add(0, currentBins)
+    }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF040A07)),
+        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF00FF66)))
+                    Text(
+                        text = "SCROLLING 2D WATERFALL HEATMAP (TIME-SERIES)",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace),
+                        color = Color(0xFF00FF66)
+                    )
+                }
+                Text(
+                    text = "BURST & DUTY-CYCLE HEATMAP",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace),
+                    color = Color.Gray
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(110.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black)
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val numRows = frameHistory.size.coerceAtLeast(1)
+                    val rowHeight = h / 24f
+
+                    frameHistory.forEachIndexed { rowIndex, frame ->
+                        val topY = rowIndex * rowHeight
+                        val binWidth = w / frame.size.toFloat()
+
+                        frame.forEachIndexed { binIndex, pwr ->
+                            val leftX = binIndex * binWidth
+                            val color = when {
+                                pwr > 0.8f -> Color.Red
+                                pwr > 0.6f -> Color.Yellow
+                                pwr > 0.35f -> Color(0xFF00FF66)
+                                pwr > 0.15f -> Color(0xFF00E5FF)
+                                else -> Color(0xFF001108)
+                            }
+                            drawRect(
+                                color = color,
+                                topLeft = Offset(leftX, topY),
+                                size = Size(binWidth + 0.5f, rowHeight + 0.5f)
+                            )
+                        }
                     }
                 }
             }
