@@ -82,7 +82,8 @@ fun SettingsScreen(
     onExportLogsCsvUri: (Uri) -> Unit = {},
     onExportKmlBreadcrumbsUri: (Uri) -> Unit = {},
     onPurgeHistory: () -> Unit,
-    onOpenCalibration: () -> Unit = {}
+    onOpenCalibration: () -> Unit = {},
+    onSnapshotTrustedBaseline: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -442,6 +443,21 @@ fun SettingsScreen(
                                 activeTrackColor = Color(0xFFFF3366)
                             ),
                             modifier = Modifier.testTag("settings_breach_slider")
+                        )
+                    }
+
+                    Button(
+                        onClick = onSnapshotTrustedBaseline,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B3D28))
+                    ) {
+                        Text(
+                            text = "SNAPSHOT TRUSTED BASELINE",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color(0xFF00FF66)
                         )
                     }
 

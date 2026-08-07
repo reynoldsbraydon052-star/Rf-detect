@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -477,16 +478,38 @@ fun UwbArCameraScreen(
                         close()
                     }
 
-                    drawPath(
-                        path = path,
-                        color = targetColor.copy(alpha = if (isSelected) 0.85f else 0.55f),
-                        style = Fill
-                    )
-                    drawPath(
-                        path = path,
-                        color = targetColor,
-                        style = Stroke(width = if (isSelected) 3f else 1.8f)
-                    )
+                    // AR Core Depth Mesh Simulation
+                    val simulatedDepthMapDistance = 2.0f + ((blip.id.hashCode() and 0x7FFFFFFF) % 50) / 10.0f
+                    val isOccludedByDepthMesh = blip.distance > simulatedDepthMapDistance
+
+                    if (isOccludedByDepthMesh) {
+                        // AR Core Depth Occlusion: Tactical X-Ray Wireframe
+                        drawPath(
+                            path = path,
+                            color = targetColor.copy(alpha = 0.25f),
+                            style = Fill
+                        )
+                        drawPath(
+                            path = path,
+                            color = targetColor.copy(alpha = 0.8f),
+                            style = Stroke(
+                                width = if (isSelected) 3f else 1.8f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                            )
+                        )
+                    } else {
+                        // Direct Line-of-Sight: Solid Marker
+                        drawPath(
+                            path = path,
+                            color = targetColor.copy(alpha = if (isSelected) 0.85f else 0.55f),
+                            style = Fill
+                        )
+                        drawPath(
+                            path = path,
+                            color = targetColor,
+                            style = Stroke(width = if (isSelected) 3f else 1.8f)
+                        )
+                    }
 
                     drawLine(
                         color = targetColor.copy(alpha = 0.4f),
@@ -502,9 +525,10 @@ fun UwbArCameraScreen(
                     )
 
                     val elevStr = if (proj.estimatedElevationMeters >= 0) "+%.1fm".format(proj.estimatedElevationMeters) else "%.1fm".format(proj.estimatedElevationMeters)
-                    val labelText = "${blip.name.take(12)}\n%.1fm • %ddBm\nALT: %s".format(blip.distance, blip.rssi, elevStr)
+                    val ouiWarning = if (blip.isHighRiskVendor) "\n⚠ HIGH-RISK OUI" else ""
+                    val labelText = "${blip.name.take(12)}\n%.1fm • %ddBm\nALT: %s%s".format(blip.distance, blip.rssi, elevStr, ouiWarning)
                     val textPaint = android.graphics.Paint().apply {
-                        color = if (isSelected) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
+                        color = if (blip.isHighRiskVendor) android.graphics.Color.RED else if (isSelected) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
                         textSize = (26f * visualScale).coerceIn(18f, 34f)
                         typeface = android.graphics.Typeface.MONOSPACE
                         isAntiAlias = true

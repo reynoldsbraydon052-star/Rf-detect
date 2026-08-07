@@ -616,7 +616,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                         RadarTab.SECURITY_GUARD -> SecurityGuardScreen(
                             uiState = uiState,
                             onThresholdChanged = { viewModel.setPerimeterThreshold(it) },
-                            onToggleAlarm = { viewModel.togglePerimeterAlarm() }
+                            onToggleAlarm = { viewModel.togglePerimeterAlarm() },
+                            onSnapshotTrustedBaseline = { viewModel.snapshotTrustedBaseline() }
                         )
 
                         RadarTab.CSV_LOG_CONSOLE -> CsvLogConsoleScreen(
@@ -642,7 +643,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onExportLogsCsvUri = { uri -> viewModel.writeLogsToUri(context, uri) },
                             onExportKmlBreadcrumbsUri = { uri -> viewModel.writeKmlToUri(context, uri) },
                             onPurgeHistory = { viewModel.purgeInterceptionHistory() },
-                            onOpenCalibration = { viewModel.openFigureEightCalibration() }
+                            onOpenCalibration = { viewModel.openFigureEightCalibration() },
+                            onSnapshotTrustedBaseline = { viewModel.snapshotTrustedBaseline() }
                         )
                     }
                 }
@@ -1725,6 +1727,7 @@ fun SpectrumAnalyzerScreen(
                     onOpenArCameraForTarget = onOpenArCameraForTarget
                 )
                 PhoneAntennaArrayCard(telemetryList = uiState.antennaArrayTelemetry)
+                ThermalFusionCard(uiState = uiState)
                 LargeSpectrumVisualizerCard(
                     activeBlips = uiState.activeBlips,
                     selectedTargetDeviceId = uiState.selectedTargetDeviceId,
@@ -1803,6 +1806,10 @@ fun SpectrumAnalyzerScreen(
 
             item {
                 PhoneAntennaArrayCard(telemetryList = uiState.antennaArrayTelemetry)
+            }
+            
+            item {
+                ThermalFusionCard(uiState = uiState)
             }
 
             item {
@@ -2433,7 +2440,8 @@ fun MagnetometerScreen(
 fun SecurityGuardScreen(
     uiState: SignalRadarUiState,
     onThresholdChanged: (Float) -> Unit,
-    onToggleAlarm: () -> Unit
+    onToggleAlarm: () -> Unit,
+    onSnapshotTrustedBaseline: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -2457,32 +2465,36 @@ fun SecurityGuardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.Security,
-                            contentDescription = "Guard",
-                            tint = MaterialTheme.colorScheme.error
+                            contentDescription = "Security Guard",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
                         )
                         Text(
-                            text = "Micro-Perimeter Shield",
+                            text = "PERIMETER SECURE",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            ),
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
-
                     Switch(
                         checked = uiState.isPerimeterAlarmEnabled,
                         onCheckedChange = { onToggleAlarm() },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = MaterialTheme.colorScheme.error,
-                            checkedTrackColor = MaterialTheme.colorScheme.error.copy(alpha = 0.3f)
+                            checkedTrackColor = MaterialTheme.colorScheme.errorContainer
                         )
                     )
                 }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
 
                 // Threshold Slider
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2513,6 +2525,29 @@ fun SecurityGuardScreen(
                         Text("15m", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                     }
                 }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+
+                Button(
+                    onClick = onSnapshotTrustedBaseline,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B3D28))
+                ) {
+                    Text(
+                        text = "SNAPSHOT TRUSTED BASELINE",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00FF66)
+                    )
+                }
+                
+                Text(
+                    text = "Any node recorded in the baseline will not trigger perimeter intrusion alerts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
 
                 // Active Breaches Card
                 Surface(

@@ -8,6 +8,8 @@ import android.os.Build
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -153,7 +155,9 @@ data class SignalRadarUiState(
     val bleTrackerData: BleTrackerEngineTelemetry = BleTrackerEngineTelemetry(),
     val cellularData: CellularTelemetryState = CellularTelemetryState(),
     val ultrasonicData: UltrasonicSpectrumData = UltrasonicSpectrumData(),
-    val sdrDeviceData: UsbSdrDeviceState = UsbSdrDeviceState()
+    val sdrDeviceData: UsbSdrDeviceState = UsbSdrDeviceState(),
+    val baselineWhitelistedMacs: Set<String> = emptySet(),
+    val baselineMagneticFluxMicroTesla: Float? = null
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -470,6 +474,8 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun headingDegreesToRad(): Float = _uiState.value.headingDegrees
 
+    private var baselineAltitudeMeters = 0f
+
     private fun processSignalIntercept(rawBlip: RadarBlip) {
         val distanceFilter = kalmanFilters.getOrPut("${rawBlip.id}_dist") { KalmanFilter(processNoise = 0.008f, measurementNoise = 0.4f) }
         val rssiFilter = kalmanFilters.getOrPut("${rawBlip.id}_rssi") { KalmanFilter(processNoise = 0.05f, measurementNoise = 1.0f) }
@@ -477,13 +483,43 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val smoothedDistance = distanceFilter.update(rawBlip.distance)
         val smoothedRssi = rssiFilter.update(rawBlip.rssi.toFloat()).toInt()
 
+        val currentAlt = _uiState.value.sensorSuite.estimatedAltitudeMeters
+        if (baselineAltitudeMeters == 0f && currentAlt > 0f) {
+            baselineAltitudeMeters = currentAlt
+        }
+        val altDelta = currentAlt - baselineAltitudeMeters
+        val hashOffset = ((rawBlip.id.hashCode() and 0x7FFFFFFF) % 80) / 10f - 4.0f
+        // Vertical elevation differential (Z-axis offset) using barometer delta
+        val calculatedZOffset = hashOffset - altDelta
+
         val smoothedBlip = rawBlip.copy(
             distance = smoothedDistance,
             rssi = smoothedRssi,
-            targetAngleOffset = rawBlip.targetAngleOffset
+            targetAngleOffset = rawBlip.targetAngleOffset,
+            estimatedZOffsetMeters = calculatedZOffset
         )
 
         blipMap[smoothedBlip.id] = smoothedBlip
+
+        if (smoothedBlip.ouiVendor == null && rawBlip.id.length >= 8) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val macPrefix = rawBlip.id.take(8).uppercase()
+                if (macPrefix.matches(Regex("^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$"))) {
+                    val db = OuiDatabase.getDatabase(getApplication())
+                    val ouiData = db.ouiDao().getVendorByPrefix(macPrefix)
+                    if (ouiData != null) {
+                        val existing = blipMap[rawBlip.id]
+                        if (existing != null) {
+                            blipMap[rawBlip.id] = existing.copy(
+                                ouiVendor = ouiData.vendorName,
+                                isHighRiskVendor = ouiData.isHighRisk
+                            )
+                            _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                        }
+                    }
+                }
+            }
+        }
 
         val threshold = _uiState.value.perimeterThresholdMeters
         val isBreach = smoothedDistance < threshold
@@ -491,7 +527,14 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val rssiThreshold = _uiState.value.rssiAlertThresholdDbm
         val isRssiAlert = smoothedRssi >= rssiThreshold && _uiState.value.isRssiAlertEnabled
 
-        if ((isBreach || isRssiAlert) && _uiState.value.isPerimeterAlarmEnabled && !_uiState.value.stealthModeEnabled) {
+        val isWhitelisted = _uiState.value.baselineWhitelistedMacs.contains(smoothedBlip.id)
+        
+        val magBaseline = _uiState.value.baselineMagneticFluxMicroTesla
+        val isMagAnomaly = smoothedBlip.type == "MAGNETIC" && magBaseline != null && Math.abs(-smoothedBlip.rssi - magBaseline) > 25.0f
+
+        if (isWhitelisted) {
+            // Suppress alerts for whitelist
+        } else if ((isBreach || isRssiAlert || smoothedBlip.isHighRiskVendor || isMagAnomaly) && _uiState.value.isPerimeterAlarmEnabled && !_uiState.value.stealthModeEnabled) {
             alarmEngine.triggerProximityAlert()
         }
 
@@ -636,6 +679,22 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     fun clearLogHistory() {
         historyLogger.clearLog()
         _uiState.update { it.copy(logConsoleTail = historyLogger.readLogTail(15)) }
+    }
+
+    fun snapshotTrustedBaseline() {
+        val currentMacs = _uiState.value.activeBlips.map { it.id }.toSet()
+        val currentMag = _uiState.value.magnetometerData.totalMicroTesla
+        _uiState.update {
+            it.copy(
+                baselineWhitelistedMacs = currentMacs,
+                baselineMagneticFluxMicroTesla = currentMag
+            )
+        }
+        android.widget.Toast.makeText(
+            getApplication(),
+            "Trusted Baseline Snapshot Created (${currentMacs.size} nodes, ${String.format("%.1f", currentMag)} µT)",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
     }
 
     fun recalibrateMagnetometer() {

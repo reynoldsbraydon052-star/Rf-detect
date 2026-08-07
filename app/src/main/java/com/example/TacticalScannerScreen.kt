@@ -545,6 +545,18 @@ fun TacticalScannerScreen(
                                         ),
                                         color = Color.Gray
                                     )
+                                    
+                                    if (blip.ouiVendor != null) {
+                                        Text(
+                                            text = if (blip.isHighRiskVendor) "⚠ ${blip.ouiVendor} (HIGH-RISK OUI)" else blip.ouiVendor,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 9.sp,
+                                                fontWeight = if (blip.isHighRiskVendor) FontWeight.Bold else FontWeight.Normal
+                                            ),
+                                            color = if (blip.isHighRiskVendor) Color.Red else Color.LightGray
+                                        )
+                                    }
                                 }
                             }
 

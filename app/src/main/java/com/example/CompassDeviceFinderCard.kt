@@ -378,6 +378,27 @@ fun CompassDeviceFinderCard(
                             ),
                             color = Color.White
                         )
+                        
+                        // Z-Axis Vertical Elevation Badge
+                        val elevationDiff = targetBlip.estimatedZOffsetMeters
+                        val elevationText = when {
+                            abs(elevationDiff) < 1.0f -> "[= SAME LEVEL]"
+                            elevationDiff > 0f -> "[↑ FLOOR ABOVE (+%.1fm)]".format(elevationDiff)
+                            else -> "[↓ FLOOR BELOW (%.1fm)]".format(elevationDiff)
+                        }
+                        val elevationColor = when {
+                            abs(elevationDiff) < 1.0f -> Color(0xFF00FF66)
+                            elevationDiff > 0f -> Color(0xFFFFCC00)
+                            else -> Color(0xFF00E5FF)
+                        }
+                        Text(
+                            text = elevationText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = elevationColor
+                        )
 
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),

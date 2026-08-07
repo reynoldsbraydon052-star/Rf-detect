@@ -34,6 +34,13 @@ interface SdrReceiverInterface {
     fun releaseReceiver()
 }
 
+interface ThermalCameraReceiverInterface {
+    fun initializeThermalCamera(): Boolean
+    fun startThermalStream(onThermalFrameReady: (android.graphics.Bitmap) -> Unit)
+    fun stopThermalStream()
+    fun releaseThermalCamera()
+}
+
 data class UsbSdrDeviceState(
     val isDeviceAttached: Boolean = false,
     val deviceName: String = "No External SDR Hardware",
@@ -44,13 +51,15 @@ data class UsbSdrDeviceState(
     val gainDb: Float = 32.0f,
     val isStreamingIq: Boolean = false,
     val bufferFramesCount: Long = 0L,
-    val supportedHardwareModel: String = "RTL-SDR / HackRF / LimeSDR OTG Ready"
+    val supportedHardwareModel: String = "RTL-SDR / HackRF / LimeSDR OTG Ready",
+    val isThermalCameraAttached: Boolean = false,
+    val thermalCameraModel: String = "FLIR ONE / UVC Thermal Class"
 )
 
 class UsbSdrHardwareManager(
     private val context: Context,
     private val onIqBufferReceived: (inPhaseI: FloatArray, quadratureQ: FloatArray) -> Unit
-) : SdrReceiverInterface {
+) : SdrReceiverInterface, ThermalCameraReceiverInterface {
 
     private val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
 
@@ -198,5 +207,49 @@ class UsbSdrHardwareManager(
     override fun releaseReceiver() {
         stopIqStream()
         unregisterUsbListener()
+    }
+    
+    // Thermal Camera Implementation
+    private var isThermalStreaming = false
+    private var thermalStreamingJob: Job? = null
+    
+    override fun initializeThermalCamera(): Boolean {
+        _sdrStateFlow.value = _sdrStateFlow.value.copy(
+            isThermalCameraAttached = true,
+            thermalCameraModel = "FLIR ONE Pro Thermal Camera (Simulated)"
+        )
+        return true
+    }
+
+    override fun startThermalStream(onThermalFrameReady: (android.graphics.Bitmap) -> Unit) {
+        if (isThermalStreaming) return
+        isThermalStreaming = true
+        thermalStreamingJob = streamingScope.launch {
+            while (isActive && isThermalStreaming) {
+                delay(100) // 10 FPS
+                val bitmap = android.graphics.Bitmap.createBitmap(160, 120, android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas = android.graphics.Canvas(bitmap)
+                canvas.drawColor(android.graphics.Color.HSVToColor(floatArrayOf(Random.nextFloat() * 20f + 200f, 0.8f, 0.4f)))
+                
+                // Add synthetic heat bloom
+                val paint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.YELLOW
+                    maskFilter = android.graphics.BlurMaskFilter(20f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+                }
+                canvas.drawCircle(80f + (Random.nextFloat() * 10f), 60f + (Random.nextFloat() * 10f), 30f, paint)
+                
+                onThermalFrameReady(bitmap)
+            }
+        }
+    }
+
+    override fun stopThermalStream() {
+        isThermalStreaming = false
+        thermalStreamingJob?.cancel()
+    }
+
+    override fun releaseThermalCamera() {
+        stopThermalStream()
+        _sdrStateFlow.value = _sdrStateFlow.value.copy(isThermalCameraAttached = false)
     }
 }
