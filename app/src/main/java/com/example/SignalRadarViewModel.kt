@@ -157,7 +157,13 @@ data class SignalRadarUiState(
     val ultrasonicData: UltrasonicSpectrumData = UltrasonicSpectrumData(),
     val sdrDeviceData: UsbSdrDeviceState = UsbSdrDeviceState(),
     val baselineWhitelistedMacs: Set<String> = emptySet(),
-    val baselineMagneticFluxMicroTesla: Float? = null
+    val baselineMagneticFluxMicroTesla: Float? = null,
+    val isRfJammingDetected: Boolean = false,
+    val isGnssSpoofingDetected: Boolean = false,
+    val imsiCatcherAlert: ImsiCatcherAlert = ImsiCatcherAlert(),
+    val isFloorplanEnabled: Boolean = false,
+    val interrogatedDossier: GattInterceptDossier? = null,
+    val isGattDossierDialogOpen: Boolean = false
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -882,6 +888,48 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     fun toggleFullScreenMap(visible: Boolean? = null) {
         _uiState.update { it.copy(isFullScreenMapVisible = visible ?: !it.isFullScreenMapVisible) }
+    }
+
+    fun toggleFloorplan() {
+        _uiState.update { it.copy(isFloorplanEnabled = !it.isFloorplanEnabled) }
+    }
+
+    fun interrogateGattForBlip(blip: RadarBlip) {
+        GattDeepInspector.connectAndInterrogate(
+            context = getApplication(),
+            targetAddress = blip.id,
+            targetName = blip.name
+        ) { dossier ->
+            _uiState.update { it.copy(interrogatedDossier = dossier, isGattDossierDialogOpen = true) }
+        }
+    }
+
+    fun closeGattDossierDialog() {
+        _uiState.update { it.copy(isGattDossierDialogOpen = false, interrogatedDossier = null) }
+    }
+
+    fun evaluateElectronicWarfareState() {
+        val blipCount = _uiState.value.activeBlips.size
+        val jamming = ElectronicWarfareMonitor.evaluateRfJamming(
+            ambientRssiAvg = -65f,
+            totalScanCount = blipCount
+        )
+        val verifier = OpenCellIdVerifier()
+        val cell = _uiState.value.cellularData.primaryServingCell
+        val imsiAlert = verifier.verifyCellTower(
+            mcc = 310,
+            mnc = 260,
+            tac = cell?.trackingAreaCodeTac ?: 1024,
+            pci = cell?.physicalCellIdPci ?: 128,
+            deviceLat = 37.7749,
+            deviceLon = -122.4194
+        )
+        _uiState.update {
+            it.copy(
+                isRfJammingDetected = jamming,
+                imsiCatcherAlert = imsiAlert
+            )
+        }
     }
 
     fun setFullScreenMapMode(mode: String) {

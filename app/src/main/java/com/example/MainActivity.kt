@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -259,6 +260,13 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
             )
         }
 
+        if (uiState.isGattDossierDialogOpen && uiState.interrogatedDossier != null) {
+            GattDossierDialog(
+                dossier = uiState.interrogatedDossier!!,
+                onDismiss = { viewModel.closeGattDossierDialog() }
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -281,6 +289,55 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) },
                     onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) }
                 )
+
+                // High-Priority EW Alert Banners
+                AnimatedVisibility(visible = uiState.isRfJammingDetected || uiState.isGnssSpoofingDetected) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF330000)),
+                        border = BorderStroke(1.5.dp, Color.Red)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = "EW Alert", tint = Color.Red)
+                            Text(
+                                text = "CRITICAL WARN: BROADCAST RF JAMMING / GNSS SPOOFING DETECTED.",
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                                color = Color.Red
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = uiState.imsiCatcherAlert.isAlertTriggered) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF331100)),
+                        border = BorderStroke(1.5.dp, Color(0xFFFF6600))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.CellTower, contentDescription = "Rogue Cell Alert", tint = Color(0xFFFF6600))
+                            Text(
+                                text = "CRITICAL WARN: UNVERIFIED / ROGUE CELL TOWER (IMSI CATCHER) DETECTED.",
+                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                                color = Color(0xFFFF6600)
+                            )
+                        }
+                    }
+                }
 
                 // Accompanist Permissions Banner for Location Access (required for Bluetooth & Wi-Fi scanning)
                 val hasLocationAccess = locationAndScanPermissionsState.permissions
@@ -555,7 +612,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
                             onPlayTestPing = { viewModel.playTestAudioPing(it) },
                             onOpenCalibration = { viewModel.openFigureEightCalibration() },
-                            onUpdateBleCatalogueTag = { mac, tag -> viewModel.updateBleCatalogueTag(mac, tag) }
+                            onUpdateBleCatalogueTag = { mac, tag -> viewModel.updateBleCatalogueTag(mac, tag) },
+                            onToggleFloorplan = { viewModel.toggleFloorplan() }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -593,7 +651,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                                 viewModel.setFullScreenMapMode("AR")
                                 viewModel.toggleFullScreenMap(true)
                             },
-                            onOpenCalibration = { viewModel.openFigureEightCalibration() }
+                            onOpenCalibration = { viewModel.openFigureEightCalibration() },
+                            onInterrogateGatt = { blip -> viewModel.interrogateGattForBlip(blip) }
                         )
 
                         RadarTab.DETECTED_SENSORS -> DetectedSensorsScreen(
@@ -1036,6 +1095,7 @@ fun SweepRadarScreen(
     onPlayTestPing: (Double) -> Unit = {},
     onOpenCalibration: () -> Unit = {},
     onUpdateBleCatalogueTag: (String, String) -> Unit = { _, _ -> },
+    onToggleFloorplan: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -1087,7 +1147,9 @@ fun SweepRadarScreen(
                         onSetMapRange = onSetMapRange,
                         onToggleMaximizeMap = onToggleMaximizeMap,
                         onOpenFullScreenMap = onOpenFullScreenMap,
-                        onSelectTargetDevice = onSelectTargetDevice
+                        onSelectTargetDevice = onSelectTargetDevice,
+                        isFloorplanEnabled = uiState.isFloorplanEnabled,
+                        onToggleFloorplan = onToggleFloorplan
                     )
 
                     Surface(
@@ -1187,6 +1249,8 @@ fun SweepRadarScreen(
                     onToggleMaximizeMap = onToggleMaximizeMap,
                     onOpenFullScreenMap = onOpenFullScreenMap,
                     onSelectTargetDevice = onSelectTargetDevice,
+                    isFloorplanEnabled = uiState.isFloorplanEnabled,
+                    onToggleFloorplan = onToggleFloorplan,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -1523,7 +1587,8 @@ fun SpectrumInterceptCard(
     blip: RadarBlip,
     perimeterThresholdMeters: Float,
     selectedTargetDeviceId: String? = null,
-    onSelectTargetDevice: ((String?) -> Unit)? = null
+    onSelectTargetDevice: ((String?) -> Unit)? = null,
+    onInterrogateGatt: ((RadarBlip) -> Unit)? = null
 ) {
     val isSelectedTarget = selectedTargetDeviceId != null &&
             (blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId)
@@ -1612,6 +1677,39 @@ fun SpectrumInterceptCard(
                         )
                     }
 
+                    if (blip.type.contains("BLE", ignoreCase = true) && onInterrogateGatt != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF003344))
+                                .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(8.dp))
+                                .clickable { onInterrogateGatt.invoke(blip) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("interrogate_gatt_button_${blip.id}")
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Radar,
+                                    contentDescription = "Interrogate GATT",
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "INTERROGATE GATT",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color(0xFF00E5FF)
+                                )
+                            }
+                        }
+                    }
+
                     if (onSelectTargetDevice != null) {
                         Box(
                             modifier = Modifier
@@ -1694,6 +1792,7 @@ fun SpectrumAnalyzerScreen(
     onToggleAudioSonar: () -> Unit = {},
     onOpenArCameraForTarget: (String) -> Unit = {},
     onOpenCalibration: () -> Unit = {},
+    onInterrogateGatt: ((RadarBlip) -> Unit)? = null,
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
@@ -1764,7 +1863,8 @@ fun SpectrumAnalyzerScreen(
                             blip = blip,
                             perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                             selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                            onSelectTargetDevice = onSelectTargetDevice
+                            onSelectTargetDevice = onSelectTargetDevice,
+                            onInterrogateGatt = onInterrogateGatt
                         )
                     }
                 }
@@ -1836,7 +1936,8 @@ fun SpectrumAnalyzerScreen(
                     blip = blip,
                     perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                     selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                    onSelectTargetDevice = onSelectTargetDevice
+                    onSelectTargetDevice = onSelectTargetDevice,
+                    onInterrogateGatt = onInterrogateGatt
                 )
             }
         }

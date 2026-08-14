@@ -62,6 +62,8 @@ fun TacticalRadarCanvas(
     onToggleMaximizeMap: () -> Unit = {},
     onOpenFullScreenMap: () -> Unit = {},
     onSelectTargetDevice: (String?) -> Unit = {},
+    isFloorplanEnabled: Boolean = false,
+    onToggleFloorplan: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Infinite transition for continuous 360 radar sweep line animation
@@ -202,6 +204,13 @@ fun TacticalRadarCanvas(
             val centerY = size.height / 2f
             val maxRadius = min(centerX, centerY) - 44f
             val maxDistanceRange = mapRangeMeters.coerceAtLeast(2.0f)
+
+            if (isFloorplanEnabled) {
+                drawFloorplanOverlay(
+                    alpha = 0.5f,
+                    radarRangeMeters = maxDistanceRange
+                )
+            }
 
             // 1. Outer Bezel & Rotating Compass Grid locked to heading
             rotate(-headingDegrees, pivot = Offset(centerX, centerY)) {
@@ -524,10 +533,15 @@ fun TacticalRadarCanvas(
                 // Smart Label Placement with Directional Text Alignment (Decluttered)
                 val shouldDrawLabel = !isSelectedTarget && (isNearestTarget || blip.isChannelSoundingCapable || isBreach || topLabeledIds.contains(blip.id))
                 if (shouldDrawLabel) {
+                    val floorBadge = when {
+                        blip.estimatedZOffsetMeters > 1.2f -> " [↑ FLOOR ABOVE]"
+                        blip.estimatedZOffsetMeters < -1.2f -> " [↓ FLOOR BELOW]"
+                        else -> ""
+                    }
                     val labelText = if (blip.isChannelSoundingCapable) {
-                        "${blip.name.take(10)} (%.1fm ±%.2fm CS)".format(blip.distance, blip.csEstimatedAccuracyMeters)
+                        "${blip.name.take(10)} (%.1fm ±%.2fm CS)%s".format(blip.distance, blip.csEstimatedAccuracyMeters, floorBadge)
                     } else {
-                        "${blip.name.take(12)} (%.1fm)".format(blip.distance)
+                        "${blip.name.take(12)} (%.1fm)%s".format(blip.distance, floorBadge)
                     }
 
                     val paint = if (blip.isChannelSoundingCapable) targetTextPaint else blipTextPaint
@@ -646,6 +660,37 @@ fun TacticalRadarCanvas(
                         ),
                         color = if (isSelected) Color.Black else Color(0xFF00FF66),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isFloorplanEnabled) Color(0xFFFFCC00) else Color(0xFF122230),
+                border = BorderStroke(1.dp, if (isFloorplanEnabled) Color.Yellow else Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .clickable { onToggleFloorplan() }
+                    .testTag("toggle_floorplan_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.TrackChanges,
+                        contentDescription = "Toggle Floorplan",
+                        tint = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (isFloorplanEnabled) "FLOORPLAN: ON" else "FLOORPLAN",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF)
                     )
                 }
             }
