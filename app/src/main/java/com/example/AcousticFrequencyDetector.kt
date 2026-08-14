@@ -43,35 +43,41 @@ class AcousticFrequencyDetector(
         val sampleRate = 44100
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat).coerceAtLeast(2048)
+        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        if (bufferSize <= 0 || bufferSize == AudioRecord.ERROR || bufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            startFallbackSyntheticListening()
+            return false
+        }
 
         return try {
-            audioRecord = AudioRecord(
+            val record = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 sampleRate,
                 channelConfig,
                 audioFormat,
-                bufferSize
+                bufferSize.coerceAtLeast(4096)
             )
 
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                record.release()
                 audioRecord = null
                 startFallbackSyntheticListening()
                 return false
             }
 
-            audioRecord?.startRecording()
-            if (audioRecord?.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                audioRecord?.release()
+            record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                record.release()
                 audioRecord = null
                 startFallbackSyntheticListening()
                 return false
             }
 
+            audioRecord = record
             isRecording = true
 
             recordJob = CoroutineScope(Dispatchers.IO).launch {
-                val buffer = ShortArray(bufferSize)
+                val buffer = ShortArray(bufferSize.coerceAtLeast(4096))
                 while (isActive && isRecording) {
                     val readSamples = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (readSamples > 0) {
@@ -83,7 +89,7 @@ class AcousticFrequencyDetector(
             }
             true
         } catch (e: Throwable) {
-            try { audioRecord?.release() } catch (_: Exception) {}
+            try { audioRecord?.release() } catch (_: Throwable) {}
             audioRecord = null
             isRecording = false
             startFallbackSyntheticListening()

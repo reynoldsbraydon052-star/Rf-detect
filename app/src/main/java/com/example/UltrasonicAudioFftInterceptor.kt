@@ -158,24 +158,37 @@ class UltrasonicAudioFftInterceptor(
             return false
         }
 
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat).coerceAtLeast(2048)
+        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        if (minBufferSize <= 0 || minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
+            startSyntheticFallbackRunner()
+            return false
+        }
 
         return try {
-            audioRecord = AudioRecord(
+            val record = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 sampleRate,
                 channelConfig,
                 audioFormat,
-                minBufferSize
+                minBufferSize.coerceAtLeast(4096)
             )
 
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                record.release()
                 audioRecord = null
                 startSyntheticFallbackRunner()
                 return false
             }
 
-            audioRecord?.startRecording()
+            record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                record.release()
+                audioRecord = null
+                startSyntheticFallbackRunner()
+                return false
+            }
+
+            audioRecord = record
             isInterceptorActive = true
 
             recordJob = interceptorScope.launch {
@@ -191,6 +204,7 @@ class UltrasonicAudioFftInterceptor(
             }
             true
         } catch (e: Throwable) {
+            try { audioRecord?.release() } catch (_: Throwable) {}
             audioRecord = null
             startSyntheticFallbackRunner()
             false
