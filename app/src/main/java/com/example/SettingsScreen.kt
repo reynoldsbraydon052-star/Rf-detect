@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,7 +84,8 @@ fun SettingsScreen(
     onExportKmlBreadcrumbsUri: (Uri) -> Unit = {},
     onPurgeHistory: () -> Unit,
     onOpenCalibration: () -> Unit = {},
-    onSnapshotTrustedBaseline: () -> Unit = {}
+    onSnapshotTrustedBaseline: () -> Unit = {},
+    onSetMaxDevices: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -202,6 +204,101 @@ fun SettingsScreen(
                             ),
                             modifier = Modifier.testTag("settings_map_range_slider")
                         )
+                    }
+
+                    // Maximum Rendered Targets Limit (DataStore Persisted)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF06150D), RoundedCornerShape(8.dp))
+                            .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Max Visible Radar Targets",
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "Limits simultenously rendered blips to eliminate scope clutter (Saved in DataStore)",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                    color = Color.Gray
+                                )
+                            }
+                            Text(
+                                text = if (uiState.maxVisibleDevices == 0) "ALL (UNLIMITED)" else "${uiState.maxVisibleDevices} TARGETS",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                        }
+
+                        Slider(
+                            value = if (uiState.maxVisibleDevices == 0) 50f else uiState.maxVisibleDevices.toFloat(),
+                            onValueChange = { value ->
+                                val intVal = value.toInt()
+                                onSetMaxDevices(if (intVal >= 50) 0 else intVal)
+                            },
+                            valueRange = 1f..50f,
+                            steps = 48,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF00FF66),
+                                activeTrackColor = Color(0xFF00FF66),
+                                inactiveTrackColor = Color.DarkGray
+                            ),
+                            modifier = Modifier.testTag("settings_max_devices_slider")
+                        )
+
+                        // Preset chips
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PRESETS:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Color.Gray
+                            )
+                            listOf(3, 5, 10, 25, 50, 0).forEach { preset ->
+                                val isSelected = uiState.maxVisibleDevices == preset
+                                val label = if (preset == 0) "ALL" else "$preset"
+                                Surface(
+                                    onClick = { onSetMaxDevices(preset) },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSelected) Color(0xFF00FF66) else Color(0xFF0B2114),
+                                    border = BorderStroke(1.dp, if (isSelected) Color.White else Color(0xFF00FF66).copy(alpha = 0.3f)),
+                                    modifier = Modifier.testTag("settings_preset_$label")
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp
+                                        ),
+                                        color = if (isSelected) Color.Black else Color.White,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Spatial Interpolation (Lerp) Smoothing Switch

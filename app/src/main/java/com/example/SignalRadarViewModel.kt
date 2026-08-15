@@ -92,6 +92,7 @@ enum class PerimeterSensitivityPreset(
 enum class RadarTab {
     SWEEP_RADAR,
     FULL_RADAR,
+    AI_THREAT_ANALYSIS,
     SCANNER,
     SPECTRUM_ANALYZER,
     DETECTED_SENSORS,
@@ -163,7 +164,25 @@ data class SignalRadarUiState(
     val imsiCatcherAlert: ImsiCatcherAlert = ImsiCatcherAlert(),
     val isFloorplanEnabled: Boolean = false,
     val interrogatedDossier: GattInterceptDossier? = null,
-    val isGattDossierDialogOpen: Boolean = false
+    val isGattDossierDialogOpen: Boolean = false,
+    // Declutter & Focus Mode System:
+    val maxVisibleDevices: Int = 10, // Max devices to show (3, 5, 10, 15, 25, 50, 0 = All)
+    val isFocusModeEnabled: Boolean = false, // When enabled, focuses purely on target device + top 3 nearest priority signals
+    val minRssiFilterDbm: Int = -95, // Filter out faint noise signals (< -95 to -50 dBm)
+    val isHudDeclutterEnabled: Boolean = true, // Smart decluttering for blip canvas text labels
+    val sortByPriority: String = "DISTANCE", // "DISTANCE" (Closest First), "RSSI" (Strongest First), "RISK" (Breaches & High Risk First)
+    // Gemini AI SIGINT & Threat Intelligence State:
+    val threatAnalysisReport: ThreatAnalysisReport? = null,
+    val isAiAnalyzingThreats: Boolean = false,
+    val copilotMessages: List<TacticalCopilotMessage> = emptyList(),
+    val isCopilotThinking: Boolean = false,
+    val selectedDeepAuditTarget: DetailedTargetAudit? = null,
+    val isDeepAuditingEmitterId: String? = null,
+    // Radar Boost & AI 3D Pinpointer State:
+    val radarBoostLevel: RadarBoostLevel = RadarBoostLevel.NORMAL_1X,
+    val activePinpointResult: AiPinpointResult? = null,
+    val isPinpointingActive: Boolean = false,
+    val isPinpointDialogOpen: Boolean = false
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
@@ -179,6 +198,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private val audioTracker = AudioRadarTracker()
     private val historyLogger = SignalHistoryLogger(application)
     private val alarmEngine = PerimeterAlarmEngine(application)
+    private val geminiThreatService = GeminiThreatAnalysisService()
 
     // Hardware Sensor & Telemetry Engines
     val uwbEngine = UwbSensorEngine(application)
@@ -214,6 +234,11 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             settingsDataStore.breachPerimeterMeters.collect { perimeter ->
                 _uiState.update { it.copy(perimeterThresholdMeters = perimeter.toFloat()) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.maxVisibleDevices.collect { maxDevices ->
+                _uiState.update { it.copy(maxVisibleDevices = maxDevices) }
             }
         }
 
@@ -894,6 +919,37 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(isFloorplanEnabled = !it.isFloorplanEnabled) }
     }
 
+    fun setMaxVisibleDevices(count: Int) {
+        val sanitized = count.coerceAtLeast(0)
+        _uiState.update { it.copy(maxVisibleDevices = sanitized) }
+        viewModelScope.launch {
+            settingsDataStore.updateMaxVisibleDevices(sanitized)
+        }
+    }
+
+    fun toggleFocusMode(enabled: Boolean? = null) {
+        _uiState.update { state ->
+            val next = enabled ?: !state.isFocusModeEnabled
+            state.copy(
+                isFocusModeEnabled = next,
+                // When entering focus mode, if max visible is large, set a crisp focused density
+                maxVisibleDevices = if (next && state.maxVisibleDevices > 5) 5 else state.maxVisibleDevices
+            )
+        }
+    }
+
+    fun setMinRssiFilter(rssiDbm: Int) {
+        _uiState.update { it.copy(minRssiFilterDbm = rssiDbm.coerceIn(-100, -30)) }
+    }
+
+    fun toggleHudDeclutter(enabled: Boolean? = null) {
+        _uiState.update { it.copy(isHudDeclutterEnabled = enabled ?: !it.isHudDeclutterEnabled) }
+    }
+
+    fun setSortByPriority(sort: String) {
+        _uiState.update { it.copy(sortByPriority = sort) }
+    }
+
     fun interrogateGattForBlip(blip: RadarBlip) {
         GattDeepInspector.connectAndInterrogate(
             context = getApplication(),
@@ -1097,6 +1153,214 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     fun purgeInterceptionHistory() {
         clearLogHistory()
         clearBleDatabaseLogs()
+    }
+
+    fun captureRfSnapshot(): RfEnvironmentSnapshot {
+        val state = _uiState.value
+        return RfEnvironmentSnapshot(
+            totalBlipsCount = state.activeBlips.size,
+            activeBlips = state.activeBlips,
+            nearestBlip = state.nearestBlip,
+            isRfJammingDetected = state.isRfJammingDetected,
+            isGnssSpoofingDetected = state.isGnssSpoofingDetected,
+            isImsiAlertActive = state.imsiCatcherAlert.isAlertTriggered,
+            isUltrasonicAlertActive = state.ultrasonicData.isPerimeterSpikeAlert || state.ultrasonicData.isUltrasonicBeaconDetected,
+            ultrasonicFreqHz = state.ultrasonicData.peakUltrasonicFreqHz.toInt(),
+            ultrasonicDb = state.ultrasonicData.peakMagnitudeDb,
+            magneticFluxMicroTesla = state.magnetometerData.totalMicroTesla,
+            compassHeading = state.headingDegrees,
+            breachCount = state.perimeterBreachCount
+        )
+    }
+
+    fun runAiThreatAnalysis() {
+        if (_uiState.value.isAiAnalyzingThreats) return
+        _uiState.update { it.copy(isAiAnalyzingThreats = true) }
+
+        viewModelScope.launch {
+            val snapshot = captureRfSnapshot()
+            val report = geminiThreatService.analyzeRfEnvironment(snapshot)
+            _uiState.update { 
+                it.copy(
+                    threatAnalysisReport = report,
+                    isAiAnalyzingThreats = false
+                )
+            }
+        }
+    }
+
+    fun sendCopilotQuery(query: String) {
+        if (query.isBlank() || _uiState.value.isCopilotThinking) return
+        val userMsg = TacticalCopilotMessage(isUser = true, text = query)
+        val updatedList = _uiState.value.copilotMessages + userMsg
+
+        _uiState.update { 
+            it.copy(
+                copilotMessages = updatedList,
+                isCopilotThinking = true
+            )
+        }
+
+        viewModelScope.launch {
+            val snapshot = captureRfSnapshot()
+            val answer = geminiThreatService.askTacticalCopilot(query, snapshot, updatedList)
+            val modelMsg = TacticalCopilotMessage(
+                isUser = false, 
+                text = answer,
+                threatLevelTag = _uiState.value.threatAnalysisReport?.threatLevel
+            )
+            _uiState.update { 
+                it.copy(
+                    copilotMessages = it.copilotMessages + modelMsg,
+                    isCopilotThinking = false
+                )
+            }
+        }
+    }
+
+    fun clearCopilotHistory() {
+        _uiState.update { it.copy(copilotMessages = emptyList()) }
+    }
+
+    fun triggerTargetDeepAudit(emitter: FlaggedThreatEmitter) {
+        _uiState.update { 
+            it.copy(
+                isDeepAuditingEmitterId = emitter.id,
+                selectedDeepAuditTarget = DetailedTargetAudit(
+                    targetId = emitter.id,
+                    targetName = emitter.name,
+                    macAddress = emitter.macAddress ?: emitter.id,
+                    signalType = emitter.signalType,
+                    rssiDbm = emitter.rssiDbm,
+                    estimatedDistanceMeters = emitter.distanceMeters,
+                    threatScore = emitter.threatScore,
+                    threatCategory = emitter.threatCategory,
+                    manufacturerVendor = "Analyzing radio signature...",
+                    radioFingerprintSummary = "Extracting physical and link layer parameters...",
+                    trackingHeuristicConfidence = 50,
+                    surveillanceRiskAnalysis = "Gemini is performing deep vulnerability extraction...",
+                    hardwareVectorAnalysis = "Estimating antenna EIRP and circuit board characteristics...",
+                    cryptographicProfile = "Evaluating cryptographic key exchange and MAC rotation intervals...",
+                    isAuditLoading = true
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            val snapshot = captureRfSnapshot()
+            val auditResult = geminiThreatService.performTargetDeepAudit(emitter, snapshot)
+            _uiState.update { state ->
+                // Also update the deep audit result within the report's flagged emitters list
+                val updatedReport = state.threatAnalysisReport?.let { rep ->
+                    val updatedEmitters = rep.flaggedEmitters.map { em ->
+                        if (em.id == emitter.id) em.copy(deepAuditResult = auditResult) else em
+                    }
+                    rep.copy(flaggedEmitters = updatedEmitters)
+                }
+
+                state.copy(
+                    selectedDeepAuditTarget = auditResult,
+                    threatAnalysisReport = updatedReport ?: state.threatAnalysisReport,
+                    isDeepAuditingEmitterId = null
+                )
+            }
+        }
+    }
+
+    fun closeDeepAuditModal() {
+        _uiState.update { 
+            it.copy(
+                selectedDeepAuditTarget = null,
+                isDeepAuditingEmitterId = null
+            ) 
+        }
+    }
+
+    // --- Radar Boost Management ---
+    fun setRadarBoostLevel(level: RadarBoostLevel) {
+        _uiState.update { it.copy(radarBoostLevel = level) }
+        historyLogger.logSignalEntry(
+            deviceName = "Radar Sensitivity Boost [${level.label}] Engaged (+${level.gainDb}dB)",
+            distanceMeters = 0f,
+            type = "RF_BOOST",
+            freqMhz = 2400.0,
+            isBreach = false
+        )
+    }
+
+    fun cycleRadarBoostLevel() {
+        val current = _uiState.value.radarBoostLevel
+        val entries = RadarBoostLevel.entries
+        val nextIndex = (entries.indexOf(current) + 1) % entries.size
+        setRadarBoostLevel(entries[nextIndex])
+    }
+
+    // --- AI 3D Pinpointer Management ---
+    fun startAiPinpoint(blip: RadarBlip) {
+        val suite = _uiState.value.sensorSuite
+        val heading = _uiState.value.headingDegrees
+        _uiState.update {
+            it.copy(
+                selectedTargetDeviceId = blip.id,
+                isPinpointingActive = true,
+                isPinpointDialogOpen = true,
+                activePinpointResult = AiPinpointResult(
+                    targetId = blip.id,
+                    targetName = blip.name,
+                    macAddress = blip.id,
+                    signalType = blip.type,
+                    currentRssiDbm = blip.rssi,
+                    distanceMeters = blip.distance,
+                    accuracyMarginMeters = if (blip.isChannelSoundingCapable) blip.csEstimatedAccuracyMeters else 0.5f,
+                    confidencePercent = 75,
+                    azimuthDegrees = (heading + blip.targetAngleOffset + 360f) % 360f,
+                    relativeClockHeading = "Calculating...",
+                    elevationPitchDeg = 0f,
+                    altitudeOffsetMeters = blip.estimatedZOffsetMeters,
+                    floorClassification = "Triangulating Elevation...",
+                    physicalZoneEstimation = "Acquiring 3D RF Spatial Matrix...",
+                    spatialVectorXyz = "X: ... Y: ... Z: ...",
+                    aiTacticalGuidance = "Gemini AI is calculating exact 3D physical azimuth, elevation pitch, and altitude offset...",
+                    searchChecklist = listOf(
+                        "1. Point phone forward along target vector.",
+                        "2. Watch 3D crosshair reticle align in real-time.",
+                        "3. Advance towards target while monitoring distance count.",
+                        "4. Follow AI elevation pitch guide."
+                    ),
+                    isPinpointingLoading = true
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            val pinpointResult = geminiThreatService.performAi3dPinpoint(blip, suite, heading)
+            _uiState.update { state ->
+                state.copy(
+                    activePinpointResult = pinpointResult,
+                    isPinpointingActive = true
+                )
+            }
+        }
+    }
+
+    fun triggerAiPinpointForCurrentTarget() {
+        val state = _uiState.value
+        val blip = state.activeBlips.find { it.id == state.selectedTargetDeviceId || it.name == state.selectedTargetDeviceId }
+            ?: state.nearestBlip
+            ?: state.activeBlips.firstOrNull()
+
+        if (blip != null) {
+            startAiPinpoint(blip)
+        }
+    }
+
+    fun closeAiPinpointDialog() {
+        _uiState.update { 
+            it.copy(
+                isPinpointDialogOpen = false,
+                isPinpointingActive = false
+            )
+        }
     }
 
     override fun onCleared() {

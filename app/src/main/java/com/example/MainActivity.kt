@@ -12,6 +12,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -267,6 +271,20 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
             )
         }
 
+        if (uiState.isPinpointDialogOpen) {
+            Ai3dPinpointDialog(
+                pinpointResult = uiState.activePinpointResult,
+                sensorSuite = uiState.sensorSuite,
+                compassHeading = uiState.headingDegrees,
+                isAudioSonarActive = uiState.isAudioSonarActive,
+                onToggleAudioSonar = { viewModel.toggleAudioSonar() },
+                onRefreshPinpoint = {
+                    viewModel.triggerAiPinpointForCurrentTarget()
+                },
+                onDismiss = { viewModel.closeAiPinpointDialog() }
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -287,7 +305,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onOpenSettings = { viewModel.setTab(RadarTab.SETTINGS) },
                     onOpenDocOverlay = { showHardwareDocOverlay = true },
                     onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) },
-                    onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) }
+                    onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) },
+                    onOpenAiIntel = { viewModel.setTab(RadarTab.AI_THREAT_ANALYSIS) }
                 )
 
                 // High-Priority EW Alert Banners
@@ -613,7 +632,14 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onPlayTestPing = { viewModel.playTestAudioPing(it) },
                             onOpenCalibration = { viewModel.openFigureEightCalibration() },
                             onUpdateBleCatalogueTag = { mac, tag -> viewModel.updateBleCatalogueTag(mac, tag) },
-                            onToggleFloorplan = { viewModel.toggleFloorplan() }
+                            onToggleFloorplan = { viewModel.toggleFloorplan() },
+                            onToggleFocusMode = { viewModel.toggleFocusMode() },
+                            onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
+                            onSetMinRssi = { viewModel.setMinRssiFilter(it) },
+                            onToggleHudDeclutter = { viewModel.toggleHudDeclutter() },
+                            onSetSortBy = { viewModel.setSortByPriority(it) },
+                            onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
+                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -623,7 +649,27 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSetMapRange = { viewModel.setMapRangeMeters(it) },
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
                             onToggleAudioSonar = { viewModel.toggleAudioSonar() },
-                            onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) }
+                            onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) },
+                            onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
+                            onToggleFocusMode = { viewModel.toggleFocusMode() },
+                            onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
+                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
+                        )
+
+                        RadarTab.AI_THREAT_ANALYSIS -> AiThreatIntelScreen(
+                            uiState = uiState,
+                            threatReport = uiState.threatAnalysisReport,
+                            isAnalyzing = uiState.isAiAnalyzingThreats,
+                            copilotMessages = uiState.copilotMessages,
+                            isCopilotThinking = uiState.isCopilotThinking,
+                            selectedDeepAuditTarget = uiState.selectedDeepAuditTarget,
+                            isDeepAuditingEmitterId = uiState.isDeepAuditingEmitterId,
+                            onRunAiThreatScan = { viewModel.runAiThreatAnalysis() },
+                            onSendCopilotQuery = { viewModel.sendCopilotQuery(it) },
+                            onSelectTargetOnRadar = { viewModel.selectTargetDevice(it) },
+                            onOpenRadarTab = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
+                            onTriggerDeepAudit = { emitter -> viewModel.triggerTargetDeepAudit(emitter) },
+                            onCloseDeepAudit = { viewModel.closeDeepAuditModal() }
                         )
 
                         RadarTab.SCANNER -> TacticalScannerScreen(
@@ -703,7 +749,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onExportKmlBreadcrumbsUri = { uri -> viewModel.writeKmlToUri(context, uri) },
                             onPurgeHistory = { viewModel.purgeInterceptionHistory() },
                             onOpenCalibration = { viewModel.openFigureEightCalibration() },
-                            onSnapshotTrustedBaseline = { viewModel.snapshotTrustedBaseline() }
+                            onSnapshotTrustedBaseline = { viewModel.snapshotTrustedBaseline() },
+                            onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) }
                         )
                     }
                 }
@@ -718,7 +765,11 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onSetMapRange = { viewModel.setMapRangeMeters(it) },
                     onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
                     onToggleAudioSonar = { viewModel.toggleAudioSonar() },
-                    onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) }
+                    onSetFullScreenMapMode = { viewModel.setFullScreenMapMode(it) },
+                    onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
+                    onToggleFocusMode = { viewModel.toggleFocusMode() },
+                    onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
+                    onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
                 )
             }
         }
@@ -731,7 +782,8 @@ fun TacticalHeader(
     onOpenSettings: (() -> Unit)? = null,
     onOpenDocOverlay: (() -> Unit)? = null,
     onOpenFullRadar: (() -> Unit)? = null,
-    onOpenScanner: (() -> Unit)? = null
+    onOpenScanner: (() -> Unit)? = null,
+    onOpenAiIntel: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -780,7 +832,7 @@ fun TacticalHeader(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Google Pixel Spectrum • 100% Sensors Active",
+                        text = "Google Pixel Spectrum • Multi-Antenna Active",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -791,6 +843,40 @@ fun TacticalHeader(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Gemini AI Intel quick access badge
+                if (onOpenAiIntel != null) {
+                    val threatLevel = uiState.threatAnalysisReport?.threatLevel ?: ThreatLevel.SECURE
+                    Surface(
+                        onClick = onOpenAiIntel,
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (uiState.selectedTab == RadarTab.AI_THREAT_ANALYSIS) threatLevel.color.copy(alpha = 0.3f) else Color(0xFF071C11),
+                        border = BorderStroke(1.dp, threatLevel.color),
+                        modifier = Modifier.testTag("header_ai_intel_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = "Gemini AI Intel",
+                                tint = threatLevel.color,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = if (uiState.isAiAnalyzingThreats) "AI SCANNING..." else "AI INTEL",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = threatLevel.color
+                            )
+                        }
+                    }
+                }
+
                 if (onOpenScanner != null) {
                     Surface(
                         onClick = onOpenScanner,
@@ -875,35 +961,6 @@ fun TacticalHeader(
                     }
                 }
 
-                // Zero connectivity shield chip
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Offline",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "100% OFFLINE",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp
-                            ),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-
                 if (onOpenSettings != null) {
                     IconButton(
                         onClick = onOpenSettings,
@@ -978,7 +1035,9 @@ fun QuickControlsCard(
     uiState: SignalRadarUiState,
     onToggleAudioSonar: () -> Unit,
     onTogglePerimeterAlarm: () -> Unit,
-    onToggleScanning: () -> Unit
+    onToggleScanning: () -> Unit,
+    onSetMaxDevices: (Int) -> Unit = {},
+    onToggleFocusMode: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -988,87 +1047,156 @@ fun QuickControlsCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Toggle Audio Sonar Button
-            OutlinedButton(
-                onClick = onToggleAudioSonar,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray
-                ),
-                modifier = Modifier.testTag("toggle_sonar_button")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.VolumeUp,
-                    contentDescription = "Sonar",
-                    tint = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (uiState.isAudioSonarActive) "SONAR ON" else "SONAR OFF",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                // Toggle Audio Sonar Button
+                OutlinedButton(
+                    onClick = onToggleAudioSonar,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent
                     ),
-                    color = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray
-                )
-            }
-
-            // Toggle Perimeter Alarm Button
-            OutlinedButton(
-                onClick = onTogglePerimeterAlarm,
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else Color.Transparent
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray
-                ),
-                modifier = Modifier.testTag("toggle_alarm_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Vibration,
-                    contentDescription = "Alarm",
-                    tint = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (uiState.isPerimeterAlarmEnabled) "ALARM ON" else "ALARM OFF",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                    border = BorderStroke(
+                        1.dp,
+                        if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray
                     ),
-                    color = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray
-                )
-            }
-
-            // Toggle Scanning Pause/Play Button
-            IconButton(
-                onClick = onToggleScanning,
-                modifier = Modifier
-                    .background(
-                        if (uiState.isScanningActive) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                        CircleShape
+                    modifier = Modifier.testTag("toggle_sonar_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = "Sonar",
+                        tint = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray,
+                        modifier = Modifier.size(16.dp)
                     )
-                    .testTag("toggle_scan_button")
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (uiState.isAudioSonarActive) "SONAR ON" else "SONAR OFF",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray
+                    )
+                }
+
+                // Toggle Perimeter Alarm Button
+                OutlinedButton(
+                    onClick = onTogglePerimeterAlarm,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else Color.Transparent
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray
+                    ),
+                    modifier = Modifier.testTag("toggle_alarm_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Vibration,
+                        contentDescription = "Alarm",
+                        tint = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (uiState.isPerimeterAlarmEnabled) "ALARM ON" else "ALARM OFF",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray
+                    )
+                }
+
+                // Toggle Scanning Pause/Play Button
+                IconButton(
+                    onClick = onToggleScanning,
+                    modifier = Modifier
+                        .background(
+                            if (uiState.isScanningActive) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
+                            CircleShape
+                        )
+                        .testTag("toggle_scan_button")
+                ) {
+                    Icon(
+                        imageVector = if (uiState.isScanningActive) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = "Scan",
+                        tint = if (uiState.isScanningActive) Color.White else Color.Black
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f), thickness = 0.8.dp)
+
+            // Direct Slider for Maximum Rendered Radar Devices in Quick Controls
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(
-                    imageVector = if (uiState.isScanningActive) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Scan",
-                    tint = if (uiState.isScanningActive) Color.White else Color.Black
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Device Slider",
+                            tint = Color(0xFF00FF66),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "MAX RADAR TARGETS SLIDER",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            ),
+                            color = Color(0xFF00FF66)
+                        )
+                    }
+                    Text(
+                        text = if (uiState.isFocusModeEnabled) "FOCUS MODE (3)" else if (uiState.maxVisibleDevices == 0) "ALL TARGETS" else "${uiState.maxVisibleDevices} MAX",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        ),
+                        color = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color.White
+                    )
+                }
+
+                Slider(
+                    value = if (uiState.isFocusModeEnabled) 3f else if (uiState.maxVisibleDevices == 0) 50f else uiState.maxVisibleDevices.toFloat(),
+                    onValueChange = { value ->
+                        if (uiState.isFocusModeEnabled) onToggleFocusMode()
+                        val intVal = value.toInt()
+                        onSetMaxDevices(if (intVal >= 50) 0 else intVal)
+                    },
+                    valueRange = 1f..50f,
+                    steps = 48,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF00FF66),
+                        activeTrackColor = Color(0xFF00FF66),
+                        inactiveTrackColor = Color.DarkGray
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .testTag("quick_controls_max_devices_slider")
                 )
             }
         }
@@ -1096,9 +1224,24 @@ fun SweepRadarScreen(
     onOpenCalibration: () -> Unit = {},
     onUpdateBleCatalogueTag: (String, String) -> Unit = { _, _ -> },
     onToggleFloorplan: () -> Unit = {},
+    onToggleFocusMode: () -> Unit = {},
+    onSetMaxDevices: (Int) -> Unit = {},
+    onSetMinRssi: (Int) -> Unit = {},
+    onToggleHudDeclutter: () -> Unit = {},
+    onSetSortBy: (String) -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
-    val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
+    val filteredBlips = rememberFilteredBlips(
+        blips = uiState.activeBlips,
+        filterType = uiState.selectedFilterType,
+        maxDevices = uiState.maxVisibleDevices,
+        isFocusMode = uiState.isFocusModeEnabled,
+        minRssiDbm = uiState.minRssiFilterDbm,
+        selectedTargetId = uiState.selectedTargetDeviceId,
+        sortBy = uiState.sortByPriority
+    )
     var showControlBottomSheet by remember { mutableStateOf(false) }
 
     if (windowSizeClass.isExpandedOrLandscape) {
@@ -1109,16 +1252,27 @@ fun SweepRadarScreen(
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Left Column: Filter Chips & Radar Scope Visualization
+            // Left Column: Filter Chips, Declutter Bar & Radar Scope Visualization
             Column(
                 modifier = Modifier
                     .weight(1.2f)
                     .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChipsRow(
                     selectedFilter = uiState.selectedFilterType,
                     onFilterSelected = onFilterSelected
+                )
+
+                RadarFocusDeclutterBar(
+                    uiState = uiState,
+                    totalDiscoveredCount = uiState.activeBlips.size,
+                    displayedCount = filteredBlips.size,
+                    onToggleFocusMode = onToggleFocusMode,
+                    onSetMaxDevices = onSetMaxDevices,
+                    onSetMinRssi = onSetMinRssi,
+                    onToggleHudDeclutter = onToggleHudDeclutter,
+                    onSetSortBy = onSetSortBy
                 )
 
                 Box(
@@ -1142,6 +1296,10 @@ fun SweepRadarScreen(
                         perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                         mapRangeMeters = uiState.mapRangeMeters,
                         isMapMaximized = uiState.isMapMaximized,
+                        isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+                        isFocusModeEnabled = uiState.isFocusModeEnabled,
+                        maxVisibleDevices = uiState.maxVisibleDevices,
+                        radarBoostLevel = uiState.radarBoostLevel,
                         onZoomIn = onZoomInMap,
                         onZoomOut = onZoomOutMap,
                         onSetMapRange = onSetMapRange,
@@ -1149,7 +1307,11 @@ fun SweepRadarScreen(
                         onOpenFullScreenMap = onOpenFullScreenMap,
                         onSelectTargetDevice = onSelectTargetDevice,
                         isFloorplanEnabled = uiState.isFloorplanEnabled,
-                        onToggleFloorplan = onToggleFloorplan
+                        onToggleFloorplan = onToggleFloorplan,
+                        onToggleFocusMode = onToggleFocusMode,
+                        onSetMaxDevices = onSetMaxDevices,
+                        onCycleRadarBoost = onCycleRadarBoost,
+                        onTriggerAiPinpoint = onTriggerAiPinpoint
                     )
 
                     Surface(
@@ -1185,14 +1347,18 @@ fun SweepRadarScreen(
                     uiState = uiState,
                     onSelectTargetDevice = onSelectTargetDevice,
                     onToggleAudioSonar = onToggleAudioSonar,
-                    onOpenCalibration = onOpenCalibration
+                    onOpenCalibration = onOpenCalibration,
+                    onTriggerAiPinpoint = onTriggerAiPinpoint,
+                    onCycleRadarBoost = onCycleRadarBoost
                 )
 
                 QuickControlsCard(
                     uiState = uiState,
                     onToggleAudioSonar = onToggleAudioSonar,
                     onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                    onToggleScanning = onToggleScanning
+                    onToggleScanning = onToggleScanning,
+                    onSetMaxDevices = onSetMaxDevices,
+                    onToggleFocusMode = onToggleFocusMode
                 )
 
                 BleDatabaseTrackerCard(
@@ -1222,6 +1388,17 @@ fun SweepRadarScreen(
                 onFilterSelected = onFilterSelected
             )
 
+            RadarFocusDeclutterBar(
+                uiState = uiState,
+                totalDiscoveredCount = uiState.activeBlips.size,
+                displayedCount = filteredBlips.size,
+                onToggleFocusMode = onToggleFocusMode,
+                onSetMaxDevices = onSetMaxDevices,
+                onSetMinRssi = onSetMinRssi,
+                onToggleHudDeclutter = onToggleHudDeclutter,
+                onSetSortBy = onSetSortBy
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1243,6 +1420,10 @@ fun SweepRadarScreen(
                     perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                     mapRangeMeters = uiState.mapRangeMeters,
                     isMapMaximized = uiState.isMapMaximized,
+                    isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+                    isFocusModeEnabled = uiState.isFocusModeEnabled,
+                    maxVisibleDevices = uiState.maxVisibleDevices,
+                    radarBoostLevel = uiState.radarBoostLevel,
                     onZoomIn = onZoomInMap,
                     onZoomOut = onZoomOutMap,
                     onSetMapRange = onSetMapRange,
@@ -1251,6 +1432,10 @@ fun SweepRadarScreen(
                     onSelectTargetDevice = onSelectTargetDevice,
                     isFloorplanEnabled = uiState.isFloorplanEnabled,
                     onToggleFloorplan = onToggleFloorplan,
+                    onToggleFocusMode = onToggleFocusMode,
+                    onSetMaxDevices = onSetMaxDevices,
+                    onCycleRadarBoost = onCycleRadarBoost,
+                    onTriggerAiPinpoint = onTriggerAiPinpoint,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -1347,14 +1532,18 @@ fun SweepRadarScreen(
                         uiState = uiState,
                         onSelectTargetDevice = onSelectTargetDevice,
                         onToggleAudioSonar = onToggleAudioSonar,
-                        onOpenCalibration = onOpenCalibration
+                        onOpenCalibration = onOpenCalibration,
+                        onTriggerAiPinpoint = onTriggerAiPinpoint,
+                        onCycleRadarBoost = onCycleRadarBoost
                     )
 
                     QuickControlsCard(
                         uiState = uiState,
                         onToggleAudioSonar = onToggleAudioSonar,
                         onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                        onToggleScanning = onToggleScanning
+                        onToggleScanning = onToggleScanning,
+                        onSetMaxDevices = onSetMaxDevices,
+                        onToggleFocusMode = onToggleFocusMode
                     )
 
                     BleDatabaseTrackerCard(
@@ -1795,7 +1984,15 @@ fun SpectrumAnalyzerScreen(
     onInterrogateGatt: ((RadarBlip) -> Unit)? = null,
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
-    val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
+    val filteredBlips = rememberFilteredBlips(
+        blips = uiState.activeBlips,
+        filterType = uiState.selectedFilterType,
+        maxDevices = uiState.maxVisibleDevices,
+        isFocusMode = uiState.isFocusModeEnabled,
+        minRssiDbm = uiState.minRssiFilterDbm,
+        selectedTargetId = uiState.selectedTargetDeviceId,
+        sortBy = uiState.sortByPriority
+    )
 
     if (windowSizeClass.isExpandedOrLandscape) {
         Row(
@@ -2803,6 +3000,7 @@ fun BottomRadarNavBar(
                             imageVector = when (tab) {
                                 RadarTab.SWEEP_RADAR -> Icons.Default.Radar
                                 RadarTab.FULL_RADAR -> Icons.Default.Radar
+                                RadarTab.AI_THREAT_ANALYSIS -> Icons.Default.Security
                                 RadarTab.SCANNER -> Icons.Default.Sensors
                                 RadarTab.SPECTRUM_ANALYZER -> Icons.Default.GraphicEq
                                 RadarTab.DETECTED_SENSORS -> Icons.Default.Sensors
@@ -2820,6 +3018,7 @@ fun BottomRadarNavBar(
                             text = when (tab) {
                                 RadarTab.SWEEP_RADAR -> "Sweep"
                                 RadarTab.FULL_RADAR -> "Full Radar"
+                                RadarTab.AI_THREAT_ANALYSIS -> "AI Intel"
                                 RadarTab.SCANNER -> "Scanner"
                                 RadarTab.SPECTRUM_ANALYZER -> "Spectrum"
                                 RadarTab.DETECTED_SENSORS -> "Sensors"
@@ -4599,13 +4798,400 @@ fun SpatialD3HeatmapCanvas(
 
 
 @Composable
-fun rememberFilteredBlips(blips: List<RadarBlip>, filterType: String): List<RadarBlip> {
-    return when {
-        filterType.equals("OFF", ignoreCase = true) || filterType.equals("NONE", ignoreCase = true) -> emptyList()
-        filterType == "ALL" -> blips
-        else -> blips.filter { it.type.equals(filterType, ignoreCase = true) }
+fun rememberFilteredBlips(
+    blips: List<RadarBlip>,
+    filterType: String,
+    maxDevices: Int = 10,
+    isFocusMode: Boolean = false,
+    minRssiDbm: Int = -95,
+    selectedTargetId: String? = null,
+    sortBy: String = "DISTANCE"
+): List<RadarBlip> {
+    return remember(blips, filterType, maxDevices, isFocusMode, minRssiDbm, selectedTargetId, sortBy) {
+        if (filterType.equals("OFF", ignoreCase = true) || filterType.equals("NONE", ignoreCase = true)) {
+            return@remember emptyList()
+        }
+
+        // 1. Filter by Signal Type
+        var list = if (filterType.equals("ALL", ignoreCase = true)) {
+            blips
+        } else {
+            blips.filter { it.type.equals(filterType, ignoreCase = true) }
+        }
+
+        // 2. Filter by minimum RSSI threshold (always keep selected target visible)
+        list = list.filter { blip ->
+            blip.id == selectedTargetId || blip.rssi >= minRssiDbm
+        }
+
+        // 3. Sort by priority
+        list = when (sortBy.uppercase()) {
+            "RSSI" -> list.sortedWith(
+                compareByDescending<RadarBlip> { it.id == selectedTargetId }
+                    .thenByDescending { it.rssi }
+                    .thenBy { it.distance }
+            )
+            "RISK" -> list.sortedWith(
+                compareByDescending<RadarBlip> { it.id == selectedTargetId }
+                    .thenByDescending { it.isHighRiskVendor }
+                    .thenBy { it.distance }
+            )
+            else -> list.sortedWith(
+                compareByDescending<RadarBlip> { it.id == selectedTargetId }
+                    .thenBy { it.distance }
+                    .thenByDescending { it.rssi }
+            )
+        }
+
+        // 4. Focus Mode: focus on target device + top 3 nearest priority devices
+        if (isFocusMode) {
+            val limit = if (selectedTargetId != null) 3 else 5
+            return@remember list.take(limit)
+        }
+
+        // 5. Max Devices Limit (0 = ALL)
+        if (maxDevices > 0 && list.size > maxDevices) {
+            val topList = list.take(maxDevices).toMutableList()
+            if (selectedTargetId != null && topList.none { it.id == selectedTargetId }) {
+                val target = list.find { it.id == selectedTargetId }
+                if (target != null) {
+                    if (topList.isNotEmpty()) topList.removeAt(topList.lastIndex)
+                    topList.add(0, target)
+                }
+            }
+            topList
+        } else {
+            list
+        }
     }
 }
+
+@Composable
+fun RadarFocusDeclutterBar(
+    uiState: SignalRadarUiState,
+    totalDiscoveredCount: Int,
+    displayedCount: Int,
+    onToggleFocusMode: () -> Unit,
+    onSetMaxDevices: (Int) -> Unit,
+    onSetMinRssi: (Int) -> Unit,
+    onToggleHudDeclutter: () -> Unit,
+    onSetSortBy: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isExpandedControlsOpen by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF091410), RoundedCornerShape(12.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Top Row: Focus Mode Pill, Presets, and Discovered Nodes Counter
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Focus Mode Pill
+                Surface(
+                    onClick = onToggleFocusMode,
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF14241C),
+                    border = BorderStroke(1.dp, if (uiState.isFocusModeEnabled) Color(0xFFFFE066) else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                    modifier = Modifier.testTag("radar_focus_mode_toggle_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Focus Mode",
+                            tint = if (uiState.isFocusModeEnabled) Color.Black else Color(0xFF00FF66),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (uiState.isFocusModeEnabled) "FOCUS: ON (TOP 3)" else "FOCUS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            ),
+                            color = if (uiState.isFocusModeEnabled) Color.Black else Color(0xFF00FF66)
+                        )
+                    }
+                }
+
+                // Quick Max Devices Limit Presets
+                val devicePresets = listOf(3, 5, 10, 25, 0)
+                devicePresets.forEach { preset ->
+                    val isSelected = uiState.maxVisibleDevices == preset && !uiState.isFocusModeEnabled
+                    val label = if (preset == 0) "ALL" else "$preset"
+                    Surface(
+                        onClick = {
+                            if (uiState.isFocusModeEnabled) onToggleFocusMode()
+                            onSetMaxDevices(preset)
+                        },
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color(0xFF111E18),
+                        border = BorderStroke(1.dp, if (isSelected) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                        modifier = Modifier.testTag("max_devices_preset_$label")
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.5.sp
+                            ),
+                            color = if (isSelected) Color.Black else Color.LightGray,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+
+            // Right side: Active count badge & Expand Fine-tuning toggle
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color.Black.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f))
+                ) {
+                    Text(
+                        text = "$displayedCount/$totalDiscoveredCount NODES",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = Color(0xFF00FF66),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = { isExpandedControlsOpen = !isExpandedControlsOpen },
+                    modifier = Modifier
+                        .size(28.dp)
+                        .testTag("toggle_declutter_slider_panel")
+                ) {
+                    Icon(
+                        imageVector = if (isExpandedControlsOpen) Icons.Default.ExpandLess else Icons.Default.Tune,
+                        contentDescription = "Fine-tune sliders",
+                        tint = if (isExpandedControlsOpen) MaterialTheme.colorScheme.primary else Color.Gray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        // Prominent Direct Slider: Maximum Visible Radar Devices Slider
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Max Devices Slider",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "MAX RADAR TARGETS LIMIT",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp
+                        ),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Text(
+                    text = if (uiState.isFocusModeEnabled) "FOCUS MODE (TOP 3)" else if (uiState.maxVisibleDevices == 0) "ALL (${totalDiscoveredCount} MAX)" else "${uiState.maxVisibleDevices} TARGETS",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    ),
+                    color = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color.White
+                )
+            }
+
+            Slider(
+                value = if (uiState.isFocusModeEnabled) 3f else if (uiState.maxVisibleDevices == 0) 50f else uiState.maxVisibleDevices.toFloat(),
+                onValueChange = { value ->
+                    if (uiState.isFocusModeEnabled) {
+                        onToggleFocusMode()
+                    }
+                    val intVal = value.toInt()
+                    onSetMaxDevices(if (intVal >= 50) 0 else intVal)
+                },
+                valueRange = 1f..50f,
+                steps = 48,
+                colors = SliderDefaults.colors(
+                    thumbColor = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else MaterialTheme.colorScheme.primary,
+                    activeTrackColor = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = Color(0xFF1B3024)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .testTag("max_visible_devices_slider")
+            )
+        }
+
+        // Expandable Secondary Slider & Fine-Tuning Precision Controls
+        AnimatedVisibility(
+            visible = isExpandedControlsOpen,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f), thickness = 0.8.dp)
+
+                // 2. Minimum Signal RSSI Cutoff Slider
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "MIN SIGNAL CUTOFF (RSSI)",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        ),
+                        color = Color(0xFF00E5FF)
+                    )
+                    Text(
+                        text = if (uiState.minRssiFilterDbm <= -95) "ALL SIGNALS (-95 dBm)" else "${uiState.minRssiFilterDbm} dBm",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        ),
+                        color = Color.White
+                    )
+                }
+
+                Slider(
+                    value = uiState.minRssiFilterDbm.toFloat(),
+                    onValueChange = { onSetMinRssi(it.toInt()) },
+                    valueRange = -95f..-50f,
+                    steps = 44,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF00E5FF),
+                        activeTrackColor = Color(0xFF00E5FF),
+                        inactiveTrackColor = Color.DarkGray
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .testTag("min_rssi_cutoff_slider")
+                )
+
+                // 3. Toggles: Smart HUD Label Declutter & Priority Sort
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            onClick = onToggleHudDeclutter,
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (uiState.isHudDeclutterEnabled) Color(0xFF00FF66).copy(alpha = 0.2f) else Color(0xFF18221D),
+                            border = BorderStroke(1.dp, if (uiState.isHudDeclutterEnabled) Color(0xFF00FF66) else Color.Gray.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("hud_declutter_toggle_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Sensors,
+                                    contentDescription = "Declutter Labels",
+                                    tint = if (uiState.isHudDeclutterEnabled) Color(0xFF00FF66) else Color.Gray,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (uiState.isHudDeclutterEnabled) "LABELS: CLEAN HUD" else "LABELS: SHOW ALL",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = if (uiState.isHudDeclutterEnabled) Color(0xFF00FF66) else Color.LightGray
+                                )
+                            }
+                        }
+                    }
+
+                    // Sort By selector chips
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("DISTANCE" to "DIST", "RSSI" to "RSSI", "RISK" to "RISK").forEach { (sortKey, label) ->
+                            val isSelected = uiState.sortByPriority == sortKey
+                            Surface(
+                                onClick = { onSetSortBy(sortKey) },
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isSelected) Color(0xFFFFCC00) else Color(0xFF121B16),
+                                border = BorderStroke(0.8.dp, if (isSelected) Color.Yellow else Color.DarkGray),
+                                modifier = Modifier.testTag("sort_by_chip_$label")
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 8.5.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = if (isSelected) Color.Black else Color.Gray,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun ProximityRangeGauge(

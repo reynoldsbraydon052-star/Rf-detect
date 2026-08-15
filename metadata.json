@@ -1,6 +1,6 @@
 {
   "name": "spec anal",
-  "description": "100% offline RF spectrum detection, Bluetooth LE sounder, Wi-Fi analyzer, and micro-perimeter device tracker.",
+  "description": "Tactical RF spectrum detection, Bluetooth LE sounder, Wi-Fi analyzer, micro-perimeter tracker, and Gemini AI RF Threat Analysis.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

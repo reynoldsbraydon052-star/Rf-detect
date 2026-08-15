@@ -16,12 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.TrackChanges
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -56,6 +51,10 @@ fun TacticalRadarCanvas(
     perimeterThresholdMeters: Float,
     mapRangeMeters: Float = 30.0f,
     isMapMaximized: Boolean = false,
+    isHudDeclutterEnabled: Boolean = true,
+    isFocusModeEnabled: Boolean = false,
+    maxVisibleDevices: Int = 10,
+    radarBoostLevel: RadarBoostLevel = RadarBoostLevel.NORMAL_1X,
     onZoomIn: () -> Unit = {},
     onZoomOut: () -> Unit = {},
     onSetMapRange: (Float) -> Unit = {},
@@ -64,6 +63,10 @@ fun TacticalRadarCanvas(
     onSelectTargetDevice: (String?) -> Unit = {},
     isFloorplanEnabled: Boolean = false,
     onToggleFloorplan: () -> Unit = {},
+    onToggleFocusMode: () -> Unit = {},
+    onSetMaxDevices: (Int) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Infinite transition for continuous 360 radar sweep line animation
@@ -397,10 +400,10 @@ fun TacticalRadarCanvas(
 
             // Determine top closest blip IDs for clean label decluttering when total node count is large
             val sortedByDist = blips.sortedBy { it.distance }
-            val topLabeledIds = if (blips.size > 10) {
-                sortedByDist.take(8).map { it.id }.toSet()
+            val topLabeledIds = if (isHudDeclutterEnabled) {
+                if (blips.size > 5) sortedByDist.take(3).map { it.id }.toSet() else blips.map { it.id }.toSet()
             } else {
-                blips.map { it.id }.toSet()
+                if (blips.size > 10) sortedByDist.take(8).map { it.id }.toSet() else blips.map { it.id }.toSet()
             }
 
             // Draw non-selected blips first, then selected target blip last on top
@@ -531,7 +534,11 @@ fun TacticalRadarCanvas(
                 )
 
                 // Smart Label Placement with Directional Text Alignment (Decluttered)
-                val shouldDrawLabel = !isSelectedTarget && (isNearestTarget || blip.isChannelSoundingCapable || isBreach || topLabeledIds.contains(blip.id))
+                val shouldDrawLabel = if (isHudDeclutterEnabled) {
+                    !isSelectedTarget && (isNearestTarget || blip.isChannelSoundingCapable || isBreach || topLabeledIds.contains(blip.id))
+                } else {
+                    !isSelectedTarget && (isNearestTarget || blip.isChannelSoundingCapable || isBreach || topLabeledIds.contains(blip.id))
+                }
                 if (shouldDrawLabel) {
                     val floorBadge = when {
                         blip.estimatedZOffsetMeters > 1.2f -> " [↑ FLOOR ABOVE]"
@@ -641,6 +648,100 @@ fun TacticalRadarCanvas(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Radar Gain / Sensitivity Boost Chip
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (radarBoostLevel != RadarBoostLevel.NORMAL_1X) radarBoostLevel.badgeColor.copy(alpha = 0.25f) else Color(0xFF0F1E17),
+                border = BorderStroke(1.dp, radarBoostLevel.badgeColor),
+                modifier = Modifier
+                    .clickable { onCycleRadarBoost() }
+                    .testTag("radar_hud_boost_chip")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = "Radar Boost",
+                        tint = radarBoostLevel.badgeColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "BOOST: ${radarBoostLevel.label}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = radarBoostLevel.badgeColor
+                    )
+                }
+            }
+
+            // Quick HUD Focus Mode Pill
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF0F1E17),
+                border = BorderStroke(1.dp, if (isFocusModeEnabled) Color(0xFFFFE066) else Color(0xFF00FF66).copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .clickable { onToggleFocusMode() }
+                    .testTag("radar_hud_focus_pill")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = "Focus",
+                        tint = if (isFocusModeEnabled) Color.Black else Color(0xFF00FF66),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = if (isFocusModeEnabled) "FOCUS: ON" else "FOCUS",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (isFocusModeEnabled) Color.Black else Color(0xFF00FF66)
+                    )
+                }
+            }
+
+            // Quick Limit cycle button (e.g. 5 -> 10 -> 25 -> ALL -> 3)
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFF101C16),
+                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .clickable {
+                        val next = when (maxVisibleDevices) {
+                            3 -> 5
+                            5 -> 10
+                            10 -> 25
+                            25 -> 0
+                            else -> 3
+                        }
+                        onSetMaxDevices(next)
+                    }
+                    .testTag("radar_hud_limit_cycle_button")
+            ) {
+                Text(
+                    text = if (maxVisibleDevices == 0) "LIM: ALL" else "LIM: $maxVisibleDevices",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color(0xFF00E5FF),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+            }
+
             listOf(5f, 15f, 30f, 60f).forEach { rangePreset ->
                 val isSelected = mapRangeMeters.toInt() == rangePreset.toInt()
                 Surface(
@@ -678,7 +779,7 @@ fun TacticalRadarCanvas(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.TrackChanges,
+                        imageVector = Icons.Default.MyLocation,
                         contentDescription = "Toggle Floorplan",
                         tint = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF),
                         modifier = Modifier.size(14.dp)
@@ -729,36 +830,76 @@ fun TacticalRadarCanvas(
 
         // Target Lock Info Status Banner Bottom Center
         if (selectedTargetDeviceId != null) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF141A06),
-                border = BorderStroke(1.dp, Color.Yellow),
+            val lockedBlip = blips.find { it.id == selectedTargetDeviceId || it.name == selectedTargetDeviceId }
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 10.dp)
-                    .clickable { onSelectTargetDevice(null) }
-                    .testTag("target_lock_active_banner")
+                    .padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF141A06),
+                    border = BorderStroke(1.dp, Color.Yellow),
+                    modifier = Modifier
+                        .clickable { onSelectTargetDevice(null) }
+                        .testTag("target_lock_active_banner")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.TrackChanges,
-                        contentDescription = "Target Lock",
-                        tint = Color.Yellow,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "AUDIO SONAR LOCKED TO DEVICE • CLICK TO UNLOCK",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp
-                        ),
-                        color = Color.Yellow
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Target Lock",
+                            tint = Color.Yellow,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "LOCKED • UNLOCK",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            color = Color.Yellow
+                        )
+                    }
+                }
+
+                if (lockedBlip != null) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF00FF66),
+                        border = BorderStroke(1.dp, Color.White),
+                        modifier = Modifier
+                            .clickable { onTriggerAiPinpoint(lockedBlip) }
+                            .testTag("target_hud_ai_pinpoint_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CenterFocusStrong,
+                                contentDescription = "AI 3D Pinpoint",
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "🎯 AI 3D PINPOINT",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 10.sp
+                                ),
+                                color = Color.Black
+                            )
+                        }
+                    }
                 }
             }
         }

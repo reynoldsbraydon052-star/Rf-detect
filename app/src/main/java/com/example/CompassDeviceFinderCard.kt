@@ -43,6 +43,8 @@ fun CompassDeviceFinderCard(
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
     onOpenCalibration: () -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isExpandedDeviceList by remember { mutableStateOf(false) }
@@ -101,6 +103,37 @@ fun CompassDeviceFinderCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Radar Boost Level Chip
+                    Surface(
+                        onClick = onCycleRadarBoost,
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (uiState.radarBoostLevel != RadarBoostLevel.NORMAL_1X) uiState.radarBoostLevel.badgeColor.copy(alpha = 0.2f) else Color(0xFF0F2618),
+                        border = BorderStroke(1.dp, uiState.radarBoostLevel.badgeColor),
+                        modifier = Modifier.testTag("compass_cycle_boost_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = "Boost Level",
+                                tint = uiState.radarBoostLevel.badgeColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "BOOST: ${uiState.radarBoostLevel.label}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = uiState.radarBoostLevel.badgeColor
+                            )
+                        }
+                    }
+
                     // Automated Figure-Eight Calibration Routine Trigger
                     Surface(
                         onClick = onOpenCalibration,
@@ -470,6 +503,41 @@ fun CompassDeviceFinderCard(
                             ),
                             color = Color.Gray
                         )
+
+                        // AI 3D Pinpointer Launch Button
+                        Surface(
+                            onClick = { onTriggerAiPinpoint(targetBlip) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF00FF66),
+                            border = BorderStroke(1.dp, Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                                .testTag("compass_launch_ai_pinpoint_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CenterFocusStrong,
+                                    contentDescription = "AI 3D Pinpoint",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "🎯 AI 3D PINPOINT HUD",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = Color.Black
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))

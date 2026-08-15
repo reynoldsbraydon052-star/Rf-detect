@@ -57,7 +57,15 @@ fun TacticalScannerScreen(
     var isDeepSweepRunning by remember { mutableStateOf(false) }
     var showMaskedAddresses by remember { mutableStateOf(true) }
 
-    val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
+    val filteredBlips = rememberFilteredBlips(
+        blips = uiState.activeBlips,
+        filterType = uiState.selectedFilterType,
+        maxDevices = uiState.maxVisibleDevices,
+        isFocusMode = uiState.isFocusModeEnabled,
+        minRssiDbm = uiState.minRssiFilterDbm,
+        selectedTargetId = uiState.selectedTargetDeviceId,
+        sortBy = uiState.sortByPriority
+    )
 
     val infiniteTransition = rememberInfiniteTransition(label = "scanner_laser")
     val laserPosition by infiniteTransition.animateFloat(

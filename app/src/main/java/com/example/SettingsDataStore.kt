@@ -22,12 +22,17 @@ class SettingsDataStore(private val context: Context) {
         val KEY_ULTRASONIC_ALERT_THRESHOLD_HZ = intPreferencesKey("ultrasonic_alert_threshold_hz")
         val KEY_ENABLED_CATEGORIES = stringSetPreferencesKey("enabled_categories")
         val KEY_BREACH_PERIMETER_METERS = intPreferencesKey("breach_perimeter_meters")
+        val KEY_MAX_VISIBLE_DEVICES = intPreferencesKey("max_visible_devices")
 
         val DEFAULT_CATEGORIES = setOf("MOBILE", "AUDIO_WEAR", "IOT", "WIFI_AP", "BEACONS", "CELLULAR", "ACOUSTIC_EMF")
     }
 
     val defaultRangeMeters: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[KEY_DEFAULT_RANGE_METERS] ?: 25
+    }
+
+    val maxVisibleDevices: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[KEY_MAX_VISIBLE_DEVICES] ?: 10
     }
 
     val rssiCutoffDbm: Flow<Int> = context.dataStore.data.map { preferences ->
@@ -93,6 +98,12 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updateBreachPerimeterMeters(perimeterMeters: Int) {
         context.dataStore.edit { preferences ->
             preferences[KEY_BREACH_PERIMETER_METERS] = perimeterMeters
+        }
+    }
+
+    suspend fun updateMaxVisibleDevices(maxDevices: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_MAX_VISIBLE_DEVICES] = maxDevices
         }
     }
 

@@ -823,7 +823,11 @@ fun FullScreenRadarScreen(
     onSetMapRange: (Float) -> Unit,
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
-    onSetFullScreenMapMode: (String) -> Unit
+    onSetFullScreenMapMode: (String) -> Unit,
+    onSetMaxDevices: (Int) -> Unit = {},
+    onToggleFocusMode: () -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {}
 ) {
     FullScreenRadarContent(
         uiState = uiState,
@@ -833,7 +837,11 @@ fun FullScreenRadarScreen(
         onSetMapRange = onSetMapRange,
         onSelectTargetDevice = onSelectTargetDevice,
         onToggleAudioSonar = onToggleAudioSonar,
-        onSetFullScreenMapMode = onSetFullScreenMapMode
+        onSetFullScreenMapMode = onSetFullScreenMapMode,
+        onSetMaxDevices = onSetMaxDevices,
+        onToggleFocusMode = onToggleFocusMode,
+        onTriggerAiPinpoint = onTriggerAiPinpoint,
+        onCycleRadarBoost = onCycleRadarBoost
     )
 }
 
@@ -846,7 +854,11 @@ fun FullScreenRadarMapOverlay(
     onSetMapRange: (Float) -> Unit,
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
-    onSetFullScreenMapMode: (String) -> Unit
+    onSetFullScreenMapMode: (String) -> Unit,
+    onSetMaxDevices: (Int) -> Unit = {},
+    onToggleFocusMode: () -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {}
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -864,7 +876,11 @@ fun FullScreenRadarMapOverlay(
             onSetMapRange = onSetMapRange,
             onSelectTargetDevice = onSelectTargetDevice,
             onToggleAudioSonar = onToggleAudioSonar,
-            onSetFullScreenMapMode = onSetFullScreenMapMode
+            onSetFullScreenMapMode = onSetFullScreenMapMode,
+            onSetMaxDevices = onSetMaxDevices,
+            onToggleFocusMode = onToggleFocusMode,
+            onTriggerAiPinpoint = onTriggerAiPinpoint,
+            onCycleRadarBoost = onCycleRadarBoost
         )
     }
 }
@@ -878,11 +894,23 @@ fun FullScreenRadarContent(
     onSetMapRange: (Float) -> Unit,
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
-    onSetFullScreenMapMode: (String) -> Unit
+    onSetFullScreenMapMode: (String) -> Unit,
+    onSetMaxDevices: (Int) -> Unit = {},
+    onToggleFocusMode: () -> Unit = {},
+    onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarBoost: () -> Unit = {}
 ) {
     val sensorSuite = uiState.sensorSuite
     val activeMode = uiState.fullScreenMapMode
-    val filteredBlips = rememberFilteredBlips(uiState.activeBlips, uiState.selectedFilterType)
+    val filteredBlips = rememberFilteredBlips(
+        blips = uiState.activeBlips,
+        filterType = uiState.selectedFilterType,
+        maxDevices = uiState.maxVisibleDevices,
+        isFocusMode = uiState.isFocusModeEnabled,
+        minRssiDbm = uiState.minRssiFilterDbm,
+        selectedTargetId = uiState.selectedTargetDeviceId,
+        sortBy = uiState.sortByPriority
+    )
 
     Box(
         modifier = Modifier
@@ -929,6 +957,9 @@ fun FullScreenRadarContent(
                     perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                     mapRangeMeters = uiState.mapRangeMeters,
                     isMapMaximized = true,
+                    isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+                    isFocusModeEnabled = uiState.isFocusModeEnabled,
+                    maxVisibleDevices = uiState.maxVisibleDevices,
                     onZoomIn = onZoomIn,
                     onZoomOut = onZoomOut,
                     onSetMapRange = onSetMapRange,
@@ -1003,6 +1034,37 @@ fun FullScreenRadarContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        // Boost Level Button
+                        Surface(
+                            onClick = onCycleRadarBoost,
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (uiState.radarBoostLevel != RadarBoostLevel.NORMAL_1X) uiState.radarBoostLevel.badgeColor.copy(alpha = 0.25f) else Color(0xFF0E2218),
+                            border = BorderStroke(1.dp, uiState.radarBoostLevel.badgeColor),
+                            modifier = Modifier.testTag("fullscreen_boost_chip")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = "Radar Boost",
+                                    tint = uiState.radarBoostLevel.badgeColor,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "BOOST: ${uiState.radarBoostLevel.label}",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = uiState.radarBoostLevel.badgeColor
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = onToggleAudioSonar,
                             modifier = Modifier
@@ -1155,6 +1217,154 @@ fun FullScreenRadarContent(
                                 .background(Color(0xFF0C2417), CircleShape)
                         ) {
                             Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = Color(0xFF00FF66), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                // Max Targets Limit Slider Component in Fullscreen Mode
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF06140D), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Limit Slider",
+                        tint = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF00FF66),
+                        modifier = Modifier.size(14.dp)
+                    )
+
+                    Text(
+                        text = if (uiState.isFocusModeEnabled) "FOCUS (3)" else if (uiState.maxVisibleDevices == 0) "ALL (${uiState.activeBlips.size})" else "MAX: ${uiState.maxVisibleDevices}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        ),
+                        color = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color.White
+                    )
+
+                    Slider(
+                        value = if (uiState.isFocusModeEnabled) 3f else if (uiState.maxVisibleDevices == 0) 50f else uiState.maxVisibleDevices.toFloat(),
+                        onValueChange = { value ->
+                            if (uiState.isFocusModeEnabled) onToggleFocusMode()
+                            val intVal = value.toInt()
+                            onSetMaxDevices(if (intVal >= 50) 0 else intVal)
+                        },
+                        valueRange = 1f..50f,
+                        steps = 48,
+                        colors = SliderDefaults.colors(
+                            thumbColor = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF00FF66),
+                            activeTrackColor = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF00FF66),
+                            inactiveTrackColor = Color(0xFF132B1D)
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(28.dp)
+                            .testTag("fullscreen_max_devices_slider")
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (uiState.isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF0E2218),
+                        border = BorderStroke(1.dp, if (uiState.isFocusModeEnabled) Color.White else Color(0xFF00FF66).copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .clickable { onToggleFocusMode() }
+                            .testTag("fullscreen_focus_mode_btn")
+                    ) {
+                        Text(
+                            text = if (uiState.isFocusModeEnabled) "FOCUS: ON" else "FOCUS",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (uiState.isFocusModeEnabled) Color.Black else Color(0xFF00FF66),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                val selectedBlip = filteredBlips.find { it.id == uiState.selectedTargetDeviceId || it.name == uiState.selectedTargetDeviceId }
+                if (selectedBlip != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF071B0F),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "TARGET: ${selectedBlip.name}",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = Color.Yellow
+                                )
+                                Text(
+                                    text = "%.1fm • %ddBm • ALT: %s".format(
+                                        selectedBlip.distance,
+                                        selectedBlip.rssi,
+                                        if (selectedBlip.estimatedZOffsetMeters >= 0) "+%.1fm".format(selectedBlip.estimatedZOffsetMeters) else "%.1fm".format(selectedBlip.estimatedZOffsetMeters)
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp
+                                    ),
+                                    color = Color.LightGray
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    onClick = { onTriggerAiPinpoint(selectedBlip) },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF00FF66),
+                                    border = BorderStroke(1.dp, Color.White),
+                                    modifier = Modifier.testTag("fullscreen_target_ai_pinpoint_btn")
+                                ) {
+                                    Text(
+                                        text = "🎯 AI 3D PINPOINT",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.5.sp
+                                        ),
+                                        color = Color.Black,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    onClick = { onSelectTargetDevice(null) },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF221111),
+                                    border = BorderStroke(1.dp, Color.Red)
+                                ) {
+                                    Text(
+                                        text = "CLEAR",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.5.sp
+                                        ),
+                                        color = Color.Red,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
