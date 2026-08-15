@@ -1,11 +1,17 @@
 package com.example
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentLinkedDeque
 
 class SignalHistoryLogger(private val context: Context) {
 
@@ -14,9 +20,28 @@ class SignalHistoryLogger(private val context: Context) {
     }
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    private val scope = CoroutineScope(Dispatchers.IO)
+    private val writeChannel = Channel<String>(capacity = 500)
+
+    // Fast in-memory cache to eliminate any disk I/O on UI thread
+    private val inMemoryHistory = ConcurrentLinkedDeque<SignalHistoryItem>()
+    private val inMemoryLogLines = Collections.synchronizedList(ArrayList<String>())
+    private val MAX_IN_MEMORY_ITEMS = 200
 
     init {
-        ensureHeaderExists()
+        scope.launch {
+            ensureHeaderExists()
+            // Drain background write channel in batches
+            for (line in writeChannel) {
+                try {
+                    FileWriter(logFile, true).use { writer ->
+                        writer.append(line)
+                    }
+                } catch (e: Exception) {
+                    // Suppress write errors safely
+                }
+            }
+        }
     }
 
     private fun ensureHeaderExists() {
@@ -38,68 +63,69 @@ class SignalHistoryLogger(private val context: Context) {
         freqMhz: Double = 2412.0,
         isBreach: Boolean = false
     ) {
-        try {
-            ensureHeaderExists()
-            val timestamp = dateFormat.format(Date())
-            val cleanName = deviceName.replace(",", " ")
-            val line = "$timestamp,$cleanName,${String.format(Locale.US, "%.2f", distanceMeters)},$type,${freqMhz.toInt()},$isBreach\n"
+        val timestamp = dateFormat.format(Date())
+        val cleanName = deviceName.replace(",", " ")
+        val line = "$timestamp,$cleanName,${String.format(Locale.US, "%.2f", distanceMeters)},$type,${freqMhz.toInt()},$isBreach\n"
 
-            FileWriter(logFile, true).use { writer ->
-                writer.append(line)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        val item = SignalHistoryItem(
+            timestamp = timestamp,
+            deviceName = cleanName,
+            distanceMeters = distanceMeters,
+            type = type,
+            frequencyMhz = freqMhz,
+            isBreach = isBreach
+        )
+
+        inMemoryHistory.addFirst(item)
+        while (inMemoryHistory.size > MAX_IN_MEMORY_ITEMS) {
+            inMemoryHistory.pollLast()
         }
+
+        synchronized(inMemoryLogLines) {
+            inMemoryLogLines.add("$timestamp - $cleanName ($type) [${String.format(Locale.US, "%.1f", distanceMeters)}m]${if (isBreach) " [BREACH]" else ""}")
+            if (inMemoryLogLines.size > 50) {
+                inMemoryLogLines.removeAt(0)
+            }
+        }
+
+        // Non-blocking try-send to disk queue
+        writeChannel.trySend(line)
     }
 
     fun readLogTail(lineCount: Int = 15): String {
-        return try {
-            if (!logFile.exists()) return "Log file empty."
-            val lines = logFile.readLines()
-            if (lines.isEmpty()) return "Log file empty."
-            val tail = lines.takeLast(lineCount)
-            tail.joinToString("\n")
-        } catch (e: Exception) {
-            "Error reading CSV logs: ${e.localizedMessage}"
+        return synchronized(inMemoryLogLines) {
+            if (inMemoryLogLines.isEmpty()) {
+                "Log console active. Listening for RF emitter signals..."
+            } else {
+                inMemoryLogLines.takeLast(lineCount).joinToString("\n")
+            }
         }
     }
 
     fun getAllLogLines(): List<String> {
-        return try {
-            if (!logFile.exists()) emptyList()
-            else logFile.readLines()
-        } catch (e: Exception) {
-            emptyList()
+        return synchronized(inMemoryLogLines) {
+            inMemoryLogLines.toList()
         }
     }
 
     fun getStructuredHistory(limit: Int = 100): List<SignalHistoryItem> {
-        val lines = getAllLogLines()
-        if (lines.size <= 1) return emptyList()
-
-        return lines.drop(1).takeLast(limit).mapNotNull { line ->
-            val parts = line.split(",")
-            if (parts.size >= 6) {
-                SignalHistoryItem(
-                    timestamp = parts[0],
-                    deviceName = parts[1],
-                    distanceMeters = parts[2].toFloatOrNull() ?: 1.0f,
-                    type = parts[3],
-                    frequencyMhz = parts[4].toDoubleOrNull() ?: 2412.0,
-                    isBreach = parts[5].toBooleanStrictOrNull() ?: false
-                )
-            } else null
-        }.reversed()
+        return inMemoryHistory.take(limit)
     }
 
     fun clearLog() {
-        try {
-            if (logFile.exists()) {
-                logFile.delete()
+        inMemoryHistory.clear()
+        synchronized(inMemoryLogLines) {
+            inMemoryLogLines.clear()
+        }
+        scope.launch {
+            try {
+                if (logFile.exists()) {
+                    logFile.delete()
+                }
+                ensureHeaderExists()
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            ensureHeaderExists()
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 

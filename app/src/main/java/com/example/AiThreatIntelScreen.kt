@@ -226,7 +226,7 @@ fun AiThreatIntelScreen(
 
                             val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(currentReport.timestampMs))
                             Text(
-                                text = "SCANNED $timeStr",
+                                text = "BUFFER: ${currentReport.analyzedRfBufferCount.coerceAtLeast(uiState.activeBlips.size)} NODES • $timeStr",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 9.sp
@@ -240,10 +240,84 @@ fun AiThreatIntelScreen(
                         text = currentReport.executiveSummary,
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
                             lineHeight = 16.sp
                         ),
-                        color = Color(0xFFDDFFDD)
+                        color = Color.White
                     )
+
+                    // Dedicated Natural Language Threat Assessment Brief Card
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF041007),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Psychology,
+                                        contentDescription = "AI Brief",
+                                        tint = Color(0xFF00FF66),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "NATURAL LANGUAGE THREAT ASSESSMENT",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.5.sp
+                                        ),
+                                        color = Color(0xFF00FF66)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        val textToCopy = """
+                                            [AI DEEP AUDIT THREAT ASSESSMENT]
+                                            Level: ${currentReport.threatLevel.label}
+                                            Score: ${currentReport.threatScore}/100
+                                            Buffer Nodes: ${currentReport.analyzedRfBufferCount}
+                                            
+                                            ${currentReport.naturalLanguageThreatAssessment}
+                                        """.trimIndent()
+                                        clipboardManager.setText(AnnotatedString(textToCopy))
+                                        copiedFeedback = true
+                                    },
+                                    modifier = Modifier.size(24.dp).testTag("copy_threat_assessment_brief_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (copiedFeedback) Icons.Default.Check else Icons.Default.ContentCopy,
+                                        contentDescription = "Copy Assessment",
+                                        tint = if (copiedFeedback) Color(0xFF00FF66) else Color.LightGray,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = currentReport.naturalLanguageThreatAssessment,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp
+                                ),
+                                color = Color(0xFFDDFFDD)
+                            )
+                        }
+                    }
 
                     // Identified Vectors Tag Cloud
                     if (currentReport.identifiedVectors.isNotEmpty()) {
@@ -297,8 +371,8 @@ fun AiThreatIntelScreen(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
-                            .testTag("run_gemini_threat_scan_button")
+                            .height(46.dp)
+                            .testTag("run_ai_deep_audit_button")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -311,7 +385,7 @@ fun AiThreatIntelScreen(
                                     color = Color(0xFF00FF66)
                                 )
                                 Text(
-                                    text = "GEMINI DEEP SCANNING SPECTRUM...",
+                                    text = "GEMINI DEEP AUDITING SPECTRUM BUFFER...",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace
@@ -326,7 +400,7 @@ fun AiThreatIntelScreen(
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Text(
-                                    text = "RUN GEMINI DEEP THREAT SCAN",
+                                    text = "RUN AI DEEP AUDIT",
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace,

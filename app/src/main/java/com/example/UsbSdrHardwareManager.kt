@@ -225,20 +225,23 @@ class UsbSdrHardwareManager(
         if (isThermalStreaming) return
         isThermalStreaming = true
         thermalStreamingJob = streamingScope.launch {
-            while (isActive && isThermalStreaming) {
-                delay(100) // 10 FPS
-                val bitmap = android.graphics.Bitmap.createBitmap(160, 120, android.graphics.Bitmap.Config.ARGB_8888)
+            var bitmap: android.graphics.Bitmap? = null
+            try {
+                bitmap = android.graphics.Bitmap.createBitmap(160, 120, android.graphics.Bitmap.Config.ARGB_8888)
                 val canvas = android.graphics.Canvas(bitmap)
-                canvas.drawColor(android.graphics.Color.HSVToColor(floatArrayOf(Random.nextFloat() * 20f + 200f, 0.8f, 0.4f)))
-                
-                // Add synthetic heat bloom
                 val paint = android.graphics.Paint().apply {
                     color = android.graphics.Color.YELLOW
                     maskFilter = android.graphics.BlurMaskFilter(20f, android.graphics.BlurMaskFilter.Blur.NORMAL)
                 }
-                canvas.drawCircle(80f + (Random.nextFloat() * 10f), 60f + (Random.nextFloat() * 10f), 30f, paint)
-                
-                onThermalFrameReady(bitmap)
+                while (isActive && isThermalStreaming) {
+                    delay(150)
+                    canvas.drawColor(android.graphics.Color.HSVToColor(floatArrayOf(Random.nextFloat() * 20f + 200f, 0.8f, 0.4f)))
+                    canvas.drawCircle(80f + (Random.nextFloat() * 10f), 60f + (Random.nextFloat() * 10f), 30f, paint)
+                    
+                    onThermalFrameReady(bitmap)
+                }
+            } finally {
+                bitmap?.recycle()
             }
         }
     }

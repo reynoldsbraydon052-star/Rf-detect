@@ -827,7 +827,8 @@ fun FullScreenRadarScreen(
     onSetMaxDevices: (Int) -> Unit = {},
     onToggleFocusMode: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
-    onCycleRadarBoost: () -> Unit = {}
+    onCycleRadarBoost: () -> Unit = {},
+    onRunAiDeepAudit: () -> Unit = {}
 ) {
     FullScreenRadarContent(
         uiState = uiState,
@@ -841,7 +842,8 @@ fun FullScreenRadarScreen(
         onSetMaxDevices = onSetMaxDevices,
         onToggleFocusMode = onToggleFocusMode,
         onTriggerAiPinpoint = onTriggerAiPinpoint,
-        onCycleRadarBoost = onCycleRadarBoost
+        onCycleRadarBoost = onCycleRadarBoost,
+        onRunAiDeepAudit = onRunAiDeepAudit
     )
 }
 
@@ -858,7 +860,8 @@ fun FullScreenRadarMapOverlay(
     onSetMaxDevices: (Int) -> Unit = {},
     onToggleFocusMode: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
-    onCycleRadarBoost: () -> Unit = {}
+    onCycleRadarBoost: () -> Unit = {},
+    onRunAiDeepAudit: () -> Unit = {}
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -880,7 +883,8 @@ fun FullScreenRadarMapOverlay(
             onSetMaxDevices = onSetMaxDevices,
             onToggleFocusMode = onToggleFocusMode,
             onTriggerAiPinpoint = onTriggerAiPinpoint,
-            onCycleRadarBoost = onCycleRadarBoost
+            onCycleRadarBoost = onCycleRadarBoost,
+            onRunAiDeepAudit = onRunAiDeepAudit
         )
     }
 }
@@ -898,7 +902,8 @@ fun FullScreenRadarContent(
     onSetMaxDevices: (Int) -> Unit = {},
     onToggleFocusMode: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
-    onCycleRadarBoost: () -> Unit = {}
+    onCycleRadarBoost: () -> Unit = {},
+    onRunAiDeepAudit: () -> Unit = {}
 ) {
     val sensorSuite = uiState.sensorSuite
     val activeMode = uiState.fullScreenMapMode
@@ -960,12 +965,15 @@ fun FullScreenRadarContent(
                     isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
                     isFocusModeEnabled = uiState.isFocusModeEnabled,
                     maxVisibleDevices = uiState.maxVisibleDevices,
+                    radarBoostLevel = uiState.radarBoostLevel,
                     onZoomIn = onZoomIn,
                     onZoomOut = onZoomOut,
                     onSetMapRange = onSetMapRange,
                     onToggleMaximizeMap = {},
                     onOpenFullScreenMap = {},
                     onSelectTargetDevice = onSelectTargetDevice,
+                    onCycleRadarBoost = onCycleRadarBoost,
+                    onTriggerAiPinpoint = onTriggerAiPinpoint,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -976,16 +984,18 @@ fun FullScreenRadarContent(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(8.dp),
+                .statusBarsPadding()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             shape = RoundedCornerShape(16.dp),
-            color = Color(0xFF07120B).copy(alpha = 0.85f),
-            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.35f))
+            color = Color(0xFF05110A).copy(alpha = 0.88f),
+            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+            shadowElevation = 8.dp
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -994,19 +1004,20 @@ fun FullScreenRadarContent(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
-                                .background(Color(0xFF00FF66).copy(alpha = 0.2f), CircleShape),
+                                .size(30.dp)
+                                .background(Color(0xFF00FF66).copy(alpha = 0.2f), CircleShape)
+                                .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Explore,
                                 contentDescription = "Heading",
                                 tint = Color(0xFF00FF66),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                         Column {
@@ -1015,17 +1026,17 @@ fun FullScreenRadarContent(
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp
+                                    fontSize = 11.5.sp
                                 ),
                                 color = Color(0xFF00FF66)
                             )
                             Text(
-                                text = "GPS 37.7749° N, 122.4194° W • ALT ${sensorSuite.estimatedAltitudeMeters.toInt()}m",
+                                text = "ALT: ${sensorSuite.estimatedAltitudeMeters.toInt()}m • ${filteredBlips.size} EMITTERS IN SCOPE",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 8.5.sp,
+                                    fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace
                                 ),
-                                color = Color.LightGray
+                                color = Color(0xFFB0BEC5)
                             )
                         }
                     }
@@ -1043,20 +1054,20 @@ fun FullScreenRadarContent(
                             modifier = Modifier.testTag("fullscreen_boost_chip")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Bolt,
                                     contentDescription = "Radar Boost",
                                     tint = uiState.radarBoostLevel.badgeColor,
-                                    modifier = Modifier.size(13.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "BOOST: ${uiState.radarBoostLevel.label}",
+                                    text = uiState.radarBoostLevel.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 9.sp,
+                                        fontSize = 9.5.sp,
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace
                                     ),
@@ -1066,11 +1077,32 @@ fun FullScreenRadarContent(
                         }
 
                         IconButton(
+                            onClick = onRunAiDeepAudit,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color(0xFF00FF66).copy(alpha = 0.2f), CircleShape)
+                                .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.7f), CircleShape)
+                                .testTag("fullscreen_ai_deep_audit_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = "Run AI Deep Audit",
+                                tint = Color(0xFF00FF66),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        IconButton(
                             onClick = onToggleAudioSonar,
                             modifier = Modifier
                                 .size(32.dp)
                                 .background(
                                     if (uiState.isAudioSonarActive) Color(0xFFFFCC00).copy(alpha = 0.25f) else Color.DarkGray.copy(alpha = 0.4f),
+                                    CircleShape
+                                )
+                                .border(
+                                    1.dp,
+                                    if (uiState.isAudioSonarActive) Color(0xFFFFCC00) else Color.Transparent,
                                     CircleShape
                                 )
                                 .testTag("fullscreen_map_audio_sonar_toggle")
@@ -1089,6 +1121,7 @@ fun FullScreenRadarContent(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .background(Color(0xFFFF3366).copy(alpha = 0.25f), CircleShape)
+                                    .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.6f), CircleShape)
                                     .testTag("close_fullscreen_map_button")
                             ) {
                                 Icon(
@@ -1102,40 +1135,41 @@ fun FullScreenRadarContent(
                     }
                 }
 
+                // Map Display Mode Selector Chips
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf(
-                            "TACTICAL" to "VECTOR",
-                            "HEATMAP" to "HEATMAP",
-                            "WATERFALL" to "WATERFALL",
-                            "SAT_GRID" to "SAT GRID",
-                            "AR" to "AR 3D"
-                        ).forEach { (modeKey, modeTitle) ->
-                            val isSel = activeMode == modeKey || (modeKey == "TACTICAL" && activeMode == "VECTOR")
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) Color(0xFF00FF66) else Color(0xFF0C1F13))
-                                    .clickable { onSetFullScreenMapMode(modeKey) }
-                                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = modeTitle,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
-                                    color = if (isSel) Color.Black else Color(0xFF00FF66)
+                    listOf(
+                        "TACTICAL" to "VECTOR",
+                        "HEATMAP" to "HEATMAP",
+                        "WATERFALL" to "WATERFALL",
+                        "SAT_GRID" to "SAT GRID",
+                        "AR" to "AR 3D"
+                    ).forEach { (modeKey, modeTitle) ->
+                        val isSel = activeMode == modeKey || (modeKey == "TACTICAL" && activeMode == "VECTOR")
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSel) Color(0xFF00FF66) else Color(0xFF0D2214))
+                                .border(
+                                    1.dp,
+                                    if (isSel) Color.White else Color(0xFF00FF66).copy(alpha = 0.25f),
+                                    RoundedCornerShape(8.dp)
                                 )
-                            }
+                                .clickable { onSetFullScreenMapMode(modeKey) }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = modeTitle,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = if (isSel) Color.Black else Color(0xFF00FF66)
+                            )
                         }
                     }
                 }
@@ -1147,10 +1181,12 @@ fun FullScreenRadarContent(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(8.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
             shape = RoundedCornerShape(16.dp),
-            color = Color(0xFF050E07).copy(alpha = 0.85f),
-            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.35f))
+            color = Color(0xFF05110A).copy(alpha = 0.88f),
+            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+            shadowElevation = 8.dp
         ) {
             Column(
                 modifier = Modifier

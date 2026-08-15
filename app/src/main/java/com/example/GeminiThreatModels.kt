@@ -76,6 +76,8 @@ data class ThreatAnalysisReport(
     val threatLevel: ThreatLevel = ThreatLevel.SECURE,
     val threatScore: Int = 12, // 0 to 100
     val executiveSummary: String = "Ambient RF environment appears standard with normal consumer BLE and Wi-Fi baseline signals.",
+    val naturalLanguageThreatAssessment: String = "All intercepted RF emitters fall within standard residential/commercial baseline parameters. No tracking tags, unauthorized beacons, or rogue APs are operating within your perimeter threshold.",
+    val analyzedRfBufferCount: Int = 0,
     val flaggedEmitters: List<FlaggedThreatEmitter> = emptyList(),
     val identifiedVectors: List<String> = emptyList(),
     val countermeasures: List<TacticalCountermeasure> = emptyList(),

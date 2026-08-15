@@ -47,13 +47,14 @@ class GeminiThreatAnalysisService {
         try {
             val systemInstruction = """
                 You are a military-grade Signals Intelligence (SIGINT), Electronic Counter-Surveillance, and RF Threat Analysis AI.
-                Analyze the provided real-time RF spectrum telemetry snapshot (Wi-Fi, Bluetooth LE, Cellular, Ultrasonic acoustic spikes, EMF magnetic flux, and UWB ranging).
+                Analyze the provided real-time RF spectrum telemetry snapshot and buffer of detected RF signals (Wi-Fi, Bluetooth LE, Cellular, Ultrasonic acoustic spikes, EMF magnetic flux, and UWB ranging).
                 
                 Respond in valid JSON format matching this schema:
                 {
                   "threatLevel": "SECURE" | "LOW_CAUTION" | "ELEVATED" | "HIGH" | "CRITICAL",
                   "threatScore": <number between 0 and 100>,
                   "executiveSummary": "<2-3 sentence high-level tactical SIGINT assessment>",
+                  "naturalLanguageThreatAssessment": "<Comprehensive multi-paragraph natural language threat assessment. Explain in clear, authoritative language what signals are present in the buffer, whether any surveillance tracking tags, rogue APs, IMSI catchers, or acoustic beacons are operating, their estimated range/proximity, risk level, and plain-English recommendations for the user.>",
                   "identifiedVectors": ["<vector 1>", "<vector 2>", ...],
                   "flaggedEmitters": [
                     {
@@ -213,15 +214,16 @@ class GeminiThreatAnalysisService {
     }
 
     private fun buildEnvironmentPrompt(snapshot: RfEnvironmentSnapshot): String {
-        val blipsSummary = snapshot.activeBlips.take(25).joinToString("\n") { blip ->
+        val blipsSummary = snapshot.activeBlips.take(30).joinToString("\n") { blip ->
             val vendor = blip.ouiVendor ?: "Unknown"
-            "Node: ID=${blip.id}, Type=${blip.type}, Name='${blip.name}', RSSI=${blip.rssi}dBm, Dist=${"%.1f".format(blip.distance)}m, Offset=${blip.targetAngleOffset.toInt()}°, HighRisk=${blip.isHighRiskVendor}, Vendor=$vendor, Freq=${blip.frequencyMhz}MHz, Band=${blip.bandLabel}"
+            "Node: ID=${blip.id}, Type=${blip.type}, Name='${blip.name}', RSSI=${blip.rssi}dBm, Dist=${"%.1f".format(blip.distance)}m, Offset=${blip.targetAngleOffset.toInt()}°, HighRisk=${blip.isHighRiskVendor}, Vendor=$vendor, Freq=${blip.frequencyMhz}MHz, Band=${blip.bandLabel}, BreachStatus=${blip.distance <= 5.0f}"
         }
 
         return """
-            Perform immediate SIGINT and Counter-Surveillance Threat Assessment on this live RF telemetry snapshot:
+            Perform an exhaustive AI Deep Audit and Counter-Surveillance Threat Assessment on this live buffer of detected RF signals:
             
-            - Total Active Detected Emitters: ${snapshot.totalBlipsCount}
+            [RF BUFFER SUMMARY]
+            - Total Active Detected Emitters in Buffer: ${snapshot.totalBlipsCount}
             - Nearest Detected Target: ${snapshot.nearestBlip?.name ?: "None"} (${snapshot.nearestBlip?.distance?.let { "%.1f".format(it) } ?: "N/A"} meters, ${snapshot.nearestBlip?.rssi ?: 0} dBm)
             - RF Electronic Jamming: ${snapshot.isRfJammingDetected}
             - GNSS / GPS Spoofing: ${snapshot.isGnssSpoofingDetected}
@@ -231,8 +233,10 @@ class GeminiThreatAnalysisService {
             - Compass Heading: ${snapshot.compassHeading.toInt()}°
             - Perimeter Warning Breaches: ${snapshot.breachCount}
             
-            [EMITTER TELEMETRY DUMP]
+            [INTERCEPTED SIGNAL BUFFER DUMP]
             $blipsSummary
+            
+            Synthesize a rich, authoritative Natural Language Threat Assessment addressing each detected vector in plain, conversational English with tactical clarity.
         """.trimIndent()
     }
 
@@ -265,7 +269,11 @@ class GeminiThreatAnalysisService {
             }
 
             val threatScore = threatObj.optInt("threatScore", if (threatLevel == ThreatLevel.CRITICAL) 92 else 20)
-            val executiveSummary = threatObj.optString("executiveSummary", "SIGINT Analysis complete.")
+            val executiveSummary = threatObj.optString("executiveSummary", "SIGINT Deep Audit complete.")
+            val naturalAssessment = threatObj.optString(
+                "naturalLanguageThreatAssessment",
+                "Based on the analysis of the current ${snapshot.totalBlipsCount} intercepted RF signals in your buffer, the environment is assessed at ${threatLevel.label} severity level."
+            )
             val rawSigint = threatObj.optString("rawSigintDetails", "")
 
             val identifiedVectors = mutableListOf<String>()
@@ -319,6 +327,8 @@ class GeminiThreatAnalysisService {
                 threatLevel = threatLevel,
                 threatScore = threatScore,
                 executiveSummary = executiveSummary,
+                naturalLanguageThreatAssessment = naturalAssessment,
+                analyzedRfBufferCount = snapshot.totalBlipsCount,
                 flaggedEmitters = flaggedEmitters,
                 identifiedVectors = identifiedVectors,
                 countermeasures = countermeasures,
@@ -984,10 +994,43 @@ class GeminiThreatAnalysisService {
             ThreatLevel.SECURE -> "SECURE: No hostile electronic countermeasures, surveillance beacons, or rogue APs detected."
         }
 
+        val naturalAssessment = buildString {
+            append("The current RF buffer contains ${snapshot.totalBlipsCount} intercepted emitters across Wi-Fi, Bluetooth LE, and Cellular spectrum bands. ")
+            when (level) {
+                ThreatLevel.CRITICAL -> {
+                    append("ALERT: Hostile electronic indicators were flagged. ")
+                    if (snapshot.isRfJammingDetected) append("Active wideband RF jamming was observed disrupting standard communications. ")
+                    if (snapshot.isImsiAlertActive) append("A cellular transceiver exhibiting rogue IMSI-catcher spoofing characteristics was intercepted. ")
+                    append("Immediate security precautions and physical perimeter verification are strongly recommended.")
+                }
+                ThreatLevel.HIGH -> {
+                    append("Elevated risk detected. ")
+                    if (flagged.isNotEmpty()) {
+                        append("Potential surveillance or unverified tracking beacons (${flagged.joinToString { it.name }}) were detected within close range (${flagged.firstOrNull()?.distanceMeters?.let { "%.1f".format(it) } ?: "2"}m). ")
+                    }
+                    append("Perform a physical sweep and verify unknown RF nodes.")
+                }
+                ThreatLevel.ELEVATED -> {
+                    append("Minor anomalies detected above baseline. ")
+                    if (snapshot.isUltrasonicAlertActive) append("Ultrasonic acoustic activity detected near ${snapshot.ultrasonicFreqHz} Hz. ")
+                    if (snapshot.magneticFluxMicroTesla > 80f) append("Magnetic flux distortion of ${"%.1f".format(snapshot.magneticFluxMicroTesla)} µT detected. ")
+                    append("Continue monitoring the radar perimeter.")
+                }
+                ThreatLevel.LOW_CAUTION -> {
+                    append("The radio environment is generally stable with low-risk consumer beacons and known access points. No tracking signatures or hostile interference detected.")
+                }
+                ThreatLevel.SECURE -> {
+                    append("All intercepted signals match standard baseline operations. Zero unauthorized beacons, rogue base stations, or abnormal electromagnetic spikes detected.")
+                }
+            }
+        }
+
         return ThreatAnalysisReport(
             threatLevel = level,
             threatScore = clampedScore,
             executiveSummary = summary + if (isOfflineFallback) " (Automated Local Heuristic Assessment)" else "",
+            naturalLanguageThreatAssessment = naturalAssessment,
+            analyzedRfBufferCount = snapshot.totalBlipsCount,
             flaggedEmitters = flagged,
             identifiedVectors = vectors,
             countermeasures = countermeasures,

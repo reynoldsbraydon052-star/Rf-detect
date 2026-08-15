@@ -82,9 +82,8 @@ class AcousticFrequencyDetector(
                     val readSamples = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (readSamples > 0) {
                         analyzePcmBuffer(buffer, readSamples, sampleRate)
-                    } else {
-                        delay(50)
                     }
+                    delay(150)
                 }
             }
             true

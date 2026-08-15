@@ -1,13 +1,11 @@
 package com.example
 
-import android.graphics.Bitmap
-import android.graphics.Paint
-import android.graphics.RectF
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -29,7 +27,7 @@ object TacticalFloorplanEngine {
 
     /**
      * Converts relative target coordinates (distance in meters, azimuth angle in degrees)
-     * into scaled canvas bitmap pixel coordinates using an affine transformation / radial project.
+     * into scaled canvas pixel coordinates using an affine transformation / radial project.
      */
     fun mapTargetToCanvasPixel(
         tofDistanceMeters: Float,
@@ -57,68 +55,11 @@ object TacticalFloorplanEngine {
 
         return if (distMeters > 0.001f) distPixels / distMeters else 12f
     }
-
-    /**
-     * Creates a high-definition synthetic tactical building blueprint overlay bitmap.
-     */
-    fun createDefaultBlueprintBitmap(width: Int = 600, height: Int = 600): ImageBitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(bitmap)
-
-        // Dark Blueprint Canvas Background
-        canvas.drawColor(android.graphics.Color.parseColor("#08121E"))
-
-        val gridPaint = Paint().apply {
-            color = android.graphics.Color.parseColor("#12354A")
-            strokeWidth = 1.5f
-            style = Paint.Style.STROKE
-        }
-
-        val wallPaint = Paint().apply {
-            color = android.graphics.Color.parseColor("#00E5FF")
-            strokeWidth = 4f
-            style = Paint.Style.STROKE
-            isAntiAlias = true
-        }
-
-        val textPaint = Paint().apply {
-            color = android.graphics.Color.parseColor("#00FF66")
-            textSize = 18f
-            isAntiAlias = true
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        // Draw Blueprint Architectural Grid
-        val step = 40
-        for (i in 0..width step step) {
-            canvas.drawLine(i.toFloat(), 0f, i.toFloat(), height.toFloat(), gridPaint)
-        }
-        for (j in 0..height step step) {
-            canvas.drawLine(0f, j.toFloat(), width.toFloat(), j.toFloat(), gridPaint)
-        }
-
-        // Outer Floorplan Perimeter Walls
-        canvas.drawRect(RectF(60f, 60f, width - 60f, height - 60f), wallPaint)
-
-        // Internal Rooms & Corridors
-        canvas.drawRect(RectF(60f, 60f, 260f, 260f), wallPaint) // Room A (TACTICAL LAB)
-        canvas.drawRect(RectF(340f, 60f, width - 60f, 260f), wallPaint) // Room B (SERVER VAULT)
-        canvas.drawRect(RectF(60f, 340f, 260f, height - 60f), wallPaint) // Room C (COMMS CENTER)
-        canvas.drawRect(RectF(340f, 340f, width - 60f, height - 60f), wallPaint) // Room D (OPS HUB)
-
-        // Room Labels
-        canvas.drawText("[TACTICAL LAB]", 80f, 120f, textPaint)
-        canvas.drawText("[SERVER VAULT]", 360f, 120f, textPaint)
-        canvas.drawText("[COMMS CENTER]", 80f, 400f, textPaint)
-        canvas.drawText("[OPS HUB]", 360f, 400f, textPaint)
-        canvas.drawText("CORRIDOR / HALLWAY", 200f, 305f, textPaint)
-
-        return bitmap.asImageBitmap()
-    }
 }
 
 /**
  * Compose DrawScope helper to render the blueprint floorplan overlay underneath radar blips.
+ * Renders directly via GPU DrawScope vector commands, eliminating software Bitmap allocation.
  */
 fun DrawScope.drawFloorplanOverlay(
     bitmap: ImageBitmap? = null,
@@ -129,31 +70,106 @@ fun DrawScope.drawFloorplanOverlay(
     alpha: Float = 0.45f,
     radarRangeMeters: Float = 30f
 ) {
-    val floorplanBitmap = bitmap ?: TacticalFloorplanEngine.createDefaultBlueprintBitmap()
-
     val canvasWidth = size.width
     val canvasHeight = size.height
     val center = Offset(canvasWidth / 2f, canvasHeight / 2f)
     val maxRadius = kotlin.math.min(canvasWidth, canvasHeight) / 2f - 20f
 
-    val destSize = IntSize((maxRadius * 2f).toInt(), (maxRadius * 2f).toInt())
-    val destOffset = IntOffset(
-        (center.x - destSize.width / 2f).toInt(),
-        (center.y - destSize.height / 2f).toInt()
-    )
+    val rectSize = maxRadius * 2f
+    val topLeft = Offset(center.x - maxRadius, center.y - maxRadius)
 
-    drawImage(
-        image = floorplanBitmap,
-        dstOffset = destOffset,
-        dstSize = destSize,
-        alpha = alpha
-    )
+    if (bitmap != null) {
+        val destSize = IntSize(rectSize.toInt(), rectSize.toInt())
+        val destOffset = IntOffset(topLeft.x.toInt(), topLeft.y.toInt())
+        drawImage(
+            image = bitmap,
+            dstOffset = destOffset,
+            dstSize = destSize,
+            alpha = alpha
+        )
+    } else {
+        // Direct GPU Vector Blueprint Rendering
+        // Dark Blueprint Background
+        drawRect(
+            color = Color(0xFF08121E).copy(alpha = alpha * 0.9f),
+            topLeft = topLeft,
+            size = Size(rectSize, rectSize)
+        )
 
-    // Render blueprint cyan border outline
+        val gridColor = Color(0xFF12354A).copy(alpha = alpha)
+        val wallColor = Color(0xFF00E5FF).copy(alpha = alpha * 1.2f)
+        val roomWallStroke = Stroke(width = 3.5f)
+        val gridStroke = Stroke(width = 1.2f)
+
+        // Architectural Grid
+        val step = rectSize / 15f
+        var cur = topLeft.x
+        while (cur <= topLeft.x + rectSize) {
+            drawLine(
+                color = gridColor,
+                start = Offset(cur, topLeft.y),
+                end = Offset(cur, topLeft.y + rectSize),
+                strokeWidth = gridStroke.width
+            )
+            cur += step
+        }
+        var curY = topLeft.y
+        while (curY <= topLeft.y + rectSize) {
+            drawLine(
+                color = gridColor,
+                start = Offset(topLeft.x, curY),
+                end = Offset(topLeft.x + rectSize, curY),
+                strokeWidth = gridStroke.width
+            )
+            curY += step
+        }
+
+        // Perimeter Wall
+        drawRect(
+            color = wallColor,
+            topLeft = Offset(topLeft.x + 20f, topLeft.y + 20f),
+            size = Size(rectSize - 40f, rectSize - 40f),
+            style = roomWallStroke
+        )
+
+        // Tactical Lab (Top-Left)
+        drawRect(
+            color = wallColor,
+            topLeft = Offset(topLeft.x + 20f, topLeft.y + 20f),
+            size = Size((rectSize - 40f) * 0.42f, (rectSize - 40f) * 0.42f),
+            style = roomWallStroke
+        )
+
+        // Server Vault (Top-Right)
+        drawRect(
+            color = wallColor,
+            topLeft = Offset(topLeft.x + 20f + (rectSize - 40f) * 0.58f, topLeft.y + 20f),
+            size = Size((rectSize - 40f) * 0.42f, (rectSize - 40f) * 0.42f),
+            style = roomWallStroke
+        )
+
+        // Comms Center (Bottom-Left)
+        drawRect(
+            color = wallColor,
+            topLeft = Offset(topLeft.x + 20f, topLeft.y + 20f + (rectSize - 40f) * 0.58f),
+            size = Size((rectSize - 40f) * 0.42f, (rectSize - 40f) * 0.42f),
+            style = roomWallStroke
+        )
+
+        // Ops Hub (Bottom-Right)
+        drawRect(
+            color = wallColor,
+            topLeft = Offset(topLeft.x + 20f + (rectSize - 40f) * 0.58f, topLeft.y + 20f + (rectSize - 40f) * 0.58f),
+            size = Size((rectSize - 40f) * 0.42f, (rectSize - 40f) * 0.42f),
+            style = roomWallStroke
+        )
+    }
+
+    // Outer Blueprint Cyan Accent Border
     drawRect(
         color = Color(0xFF00E5FF).copy(alpha = 0.6f),
-        topLeft = Offset(destOffset.x.toFloat(), destOffset.y.toFloat()),
-        size = Size(destSize.width.toFloat(), destSize.height.toFloat()),
+        topLeft = topLeft,
+        size = Size(rectSize, rectSize),
         style = Stroke(width = 2.5f)
     )
 }

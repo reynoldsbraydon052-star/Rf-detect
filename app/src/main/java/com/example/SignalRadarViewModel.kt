@@ -174,6 +174,7 @@ data class SignalRadarUiState(
     // Gemini AI SIGINT & Threat Intelligence State:
     val threatAnalysisReport: ThreatAnalysisReport? = null,
     val isAiAnalyzingThreats: Boolean = false,
+    val isAiDeepAuditDialogOpen: Boolean = false,
     val copilotMessages: List<TacticalCopilotMessage> = emptyList(),
     val isCopilotThinking: Boolean = false,
     val selectedDeepAuditTarget: DetailedTargetAudit? = null,
@@ -215,6 +216,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     private val kalmanFilters = mutableMapOf<String, KalmanFilter>()
     private val blipMap = mutableMapOf<String, RadarBlip>()
+    private var lastBlipUiUpdateMs = 0L
 
     private val _uiState = MutableStateFlow(SignalRadarUiState())
     val uiState: StateFlow<SignalRadarUiState> = _uiState.asStateFlow()
@@ -577,30 +579,34 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             isBreach = isBreach
         )
 
-        val blipsList = blipMap.values.toList()
-        val nearest = blipsList.minByOrNull { it.distance }
+        val now = System.currentTimeMillis()
+        if (now - lastBlipUiUpdateMs >= 65L) {
+            lastBlipUiUpdateMs = now
+            val blipsList = blipMap.values.toList()
+            val nearest = blipsList.minByOrNull { it.distance }
 
-        val targetDeviceId = _uiState.value.selectedTargetDeviceId
-        val targetBlip = if (targetDeviceId != null) {
-            blipsList.find { it.id == targetDeviceId || it.name == targetDeviceId } ?: nearest
-        } else {
-            nearest
-        }
-
-        targetBlip?.let {
-            if (_uiState.value.isAudioSonarActive) {
-                audioTracker.updateProximityDistance(it.distance.toDouble())
+            val targetDeviceId = _uiState.value.selectedTargetDeviceId
+            val targetBlip = if (targetDeviceId != null) {
+                blipsList.find { it.id == targetDeviceId || it.name == targetDeviceId } ?: nearest
+            } else {
+                nearest
             }
-        }
 
-        val breaches = blipsList.count { it.distance < threshold }
+            targetBlip?.let {
+                if (_uiState.value.isAudioSonarActive) {
+                    audioTracker.updateProximityDistance(it.distance.toDouble())
+                }
+            }
 
-        _uiState.update { state ->
-            state.copy(
-                activeBlips = blipsList,
-                nearestBlip = nearest,
-                perimeterBreachCount = breaches
-            )
+            val breaches = blipsList.count { it.distance < threshold }
+
+            _uiState.update { state ->
+                state.copy(
+                    activeBlips = blipsList,
+                    nearestBlip = nearest,
+                    perimeterBreachCount = breaches
+                )
+            }
         }
     }
 
@@ -1173,9 +1179,19 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
-    fun runAiThreatAnalysis() {
-        if (_uiState.value.isAiAnalyzingThreats) return
-        _uiState.update { it.copy(isAiAnalyzingThreats = true) }
+    fun runAiDeepAudit(openModal: Boolean = true) {
+        if (_uiState.value.isAiAnalyzingThreats) {
+            if (openModal) {
+                _uiState.update { it.copy(isAiDeepAuditDialogOpen = true) }
+            }
+            return
+        }
+        _uiState.update { 
+            it.copy(
+                isAiAnalyzingThreats = true,
+                isAiDeepAuditDialogOpen = if (openModal) true else it.isAiDeepAuditDialogOpen
+            )
+        }
 
         viewModelScope.launch {
             val snapshot = captureRfSnapshot()
@@ -1187,6 +1203,21 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 )
             }
         }
+    }
+
+    fun openAiDeepAuditDialog() {
+        _uiState.update { it.copy(isAiDeepAuditDialogOpen = true) }
+        if (_uiState.value.threatAnalysisReport == null && !_uiState.value.isAiAnalyzingThreats) {
+            runAiDeepAudit(openModal = true)
+        }
+    }
+
+    fun closeAiDeepAuditDialog() {
+        _uiState.update { it.copy(isAiDeepAuditDialogOpen = false) }
+    }
+
+    fun runAiThreatAnalysis() {
+        runAiDeepAudit(openModal = false)
     }
 
     fun sendCopilotQuery(query: String) {

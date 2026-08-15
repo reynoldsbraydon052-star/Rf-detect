@@ -257,7 +257,22 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
             )
         }
 
-        if (uiState.isFigureEightCalibrationActive) {
+        if (uiState.isAiDeepAuditDialogOpen) {
+        AiDeepAuditModal(
+            isOpen = uiState.isAiDeepAuditDialogOpen,
+            isAnalyzing = uiState.isAiAnalyzingThreats,
+            threatReport = uiState.threatAnalysisReport,
+            activeBlips = uiState.activeBlips,
+            onDismiss = { viewModel.closeAiDeepAuditDialog() },
+            onReRunAudit = { viewModel.runAiDeepAudit(openModal = true) },
+            onSelectTargetOnRadar = { targetId ->
+                viewModel.selectTargetDevice(targetId)
+                viewModel.setTab(RadarTab.SWEEP_RADAR)
+            }
+        )
+    }
+
+    if (uiState.isFigureEightCalibrationActive) {
             FigureEightCalibrationDialog(
                 onDismiss = { viewModel.closeFigureEightCalibration() },
                 onCalibrationComplete = { score -> viewModel.completeFigureEightCalibration(score) }
@@ -639,7 +654,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onToggleHudDeclutter = { viewModel.toggleHudDeclutter() },
                             onSetSortBy = { viewModel.setSortByPriority(it) },
                             onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
-                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
+                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
+                            onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -653,7 +669,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
                             onToggleFocusMode = { viewModel.toggleFocusMode() },
                             onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
-                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
+                            onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
+                            onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
                         )
 
                         RadarTab.AI_THREAT_ANALYSIS -> AiThreatIntelScreen(
@@ -769,7 +786,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
                     onToggleFocusMode = { viewModel.toggleFocusMode() },
                     onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
-                    onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() }
+                    onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
+                    onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
                 )
             }
         }
@@ -1231,6 +1249,7 @@ fun SweepRadarScreen(
     onSetSortBy: (String) -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
     onCycleRadarBoost: () -> Unit = {},
+    onRunAiDeepAudit: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(
@@ -1460,34 +1479,69 @@ fun SweepRadarScreen(
                 }
             }
 
-            // Bottom Bar Button to trigger ModalBottomSheet Controls
-            Button(
-                onClick = { showControlBottomSheet = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("open_tactical_controls_sheet"),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+            // Bottom Bar Actions in Portrait (AI Deep Audit + Tactical Controls Sheet)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Tune,
-                    contentDescription = "Controls",
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "EXPAND TACTICAL CONTROLS & BLE TRACKER (3 CARDS)",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
+                Button(
+                    onClick = onRunAiDeepAudit,
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .height(46.dp)
+                        .testTag("radar_quick_ai_deep_audit_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00FF66),
+                        contentColor = Color.Black
                     )
-                )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "AI Deep Audit",
+                        modifier = Modifier.size(18.dp),
+                        tint = Color.Black
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "AI DEEP AUDIT",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+
+                Button(
+                    onClick = { showControlBottomSheet = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .testTag("open_tactical_controls_sheet"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Controls",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "CONTROLS",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
             }
         }
 

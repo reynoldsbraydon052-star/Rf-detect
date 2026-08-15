@@ -38,6 +38,8 @@ class OrientationManager(
         sensorManager.unregisterListener(this)
     }
 
+    private var lastEmittedTimestampMs = 0L
+
     override fun onSensorChanged(event: SensorEvent) {
         val alpha = 0.85f // Low pass filter factor
         if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
@@ -65,7 +67,9 @@ class OrientationManager(
                 while (angleDiff < -180f) angleDiff += 360f
                 while (angleDiff > 180f) angleDiff -= 360f
 
-                if (abs(angleDiff) > 0.3f) {
+                val now = System.currentTimeMillis()
+                if (abs(angleDiff) > 0.5f && (now - lastEmittedTimestampMs >= 50L)) {
+                    lastEmittedTimestampMs = now
                     currentHeading = (currentHeading + angleDiff * 0.25f + 360f) % 360f
                     onHeadingChanged(currentHeading)
                 }

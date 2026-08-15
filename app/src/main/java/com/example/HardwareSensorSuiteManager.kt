@@ -186,7 +186,7 @@ class HardwareSensorSuiteManager(
         simulationJob = CoroutineScope(Dispatchers.Default).launch {
             var simStep = 0
             while (isActive && isListening) {
-                delay(300)
+                delay(80) // Smooth 12.5 Hz update frequency
                 simStep++
 
                 // Provide realistic live fallback telemetry if physical hardware sensors are unpopulated in container
@@ -229,8 +229,8 @@ class HardwareSensorSuiteManager(
                         pdrDistanceMeters = pdrDist
                     )
                     currentSuiteData = updatedData
-                    onSuiteUpdate(updatedData)
                 }
+                onSuiteUpdate(currentSuiteData)
             }
         }
     }
@@ -252,7 +252,6 @@ class HardwareSensorSuiteManager(
                     totalGForce = gForce,
                     isMotionDetected = isMotion
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_GYROSCOPE -> {
@@ -268,7 +267,6 @@ class HardwareSensorSuiteManager(
                     rotationalSpeedDegPerSec = rotSpeed,
                     vibrationHz = if (rotSpeed > 1.5f) rotSpeed * 2.8f else 0f
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_LIGHT -> {
@@ -284,7 +282,6 @@ class HardwareSensorSuiteManager(
                     lightCondition = condition,
                     isOpticalPulseDetected = lux > 1500f
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_PRESSURE -> {
@@ -295,7 +292,6 @@ class HardwareSensorSuiteManager(
                     pressureHpa = pressure,
                     estimatedAltitudeMeters = alt.coerceAtLeast(0.0f)
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_PROXIMITY -> {
@@ -306,7 +302,6 @@ class HardwareSensorSuiteManager(
                     proximityCm = prox,
                     isProximityNear = isNear
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_ROTATION_VECTOR -> {
@@ -324,7 +319,6 @@ class HardwareSensorSuiteManager(
                     pitchDeg = pitch,
                     rollDeg = roll
                 )
-                onSuiteUpdate(currentSuiteData)
             }
 
             Sensor.TYPE_STEP_COUNTER -> {
@@ -335,7 +329,6 @@ class HardwareSensorSuiteManager(
                     stepCount = sessionSteps,
                     pdrDistanceMeters = sessionSteps * 0.72f
                 )
-                onSuiteUpdate(currentSuiteData)
             }
         }
     }
