@@ -1,5 +1,6 @@
 package com.example
 
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import kotlinx.coroutines.CoroutineScope
@@ -37,17 +38,27 @@ class AudioRadarTracker {
                 sampleRate,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
-            )
+            ).coerceAtLeast(2048)
 
             try {
-                audioTrack = AudioTrack(
-                    android.media.AudioManager.STREAM_MUSIC,
-                    sampleRate,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBufSize.coerceAtLeast(2048),
-                    AudioTrack.MODE_STREAM
-                )
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                val audioFormat = AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(minBufSize)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+
                 audioTrack?.play()
 
                 while (isActive && isPlaying) {
@@ -76,6 +87,12 @@ class AudioRadarTracker {
                 }
             } catch (e: Exception) {
                 isPlaying = false
+            } finally {
+                try {
+                    audioTrack?.stop()
+                    audioTrack?.release()
+                } catch (_: Exception) {}
+                audioTrack = null
             }
         }
     }
@@ -87,21 +104,28 @@ class AudioRadarTracker {
                 sampleRate,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT
-            )
-            val tempTrack = try {
-                AudioTrack(
-                    android.media.AudioManager.STREAM_MUSIC,
-                    sampleRate,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBufSize.coerceAtLeast(2048),
-                    AudioTrack.MODE_STREAM
-                )
-            } catch (e: Exception) {
-                null
-            } ?: return@launch
+            ).coerceAtLeast(2048)
 
+            var tempTrack: AudioTrack? = null
             try {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                val audioFormat = AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+
+                tempTrack = AudioTrack.Builder()
+                    .setAudioAttributes(audioAttributes)
+                    .setAudioFormat(audioFormat)
+                    .setBufferSizeInBytes(minBufSize)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+
                 tempTrack.play()
                 val dist = distanceMeters.coerceIn(0.2, 50.0)
                 val freq = (1750.0 - dist * 30.0).coerceIn(400.0, 1800.0)
@@ -118,9 +142,13 @@ class AudioRadarTracker {
 
                 tempTrack.write(buffer, 0, buffer.size)
                 delay(150)
-                tempTrack.stop()
-                tempTrack.release()
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            } finally {
+                try {
+                    tempTrack?.stop()
+                    tempTrack?.release()
+                } catch (_: Exception) {}
+            }
         }
     }
 

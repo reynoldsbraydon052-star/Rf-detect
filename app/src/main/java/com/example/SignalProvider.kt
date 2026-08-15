@@ -294,13 +294,17 @@ class SignalProvider(private val context: Context) : SensorEventListener {
 
             try {
                 @SuppressLint("MissingPermission")
-                val record = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
-                    sampleRate,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBuf.coerceAtLeast(4096)
-                )
+                val record = AudioRecord.Builder()
+                    .setAudioSource(MediaRecorder.AudioSource.MIC)
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf.coerceAtLeast(4096))
+                    .build()
                 if (record.state != AudioRecord.STATE_INITIALIZED) {
                     record.release()
                     startSyntheticAcousticSimulation()

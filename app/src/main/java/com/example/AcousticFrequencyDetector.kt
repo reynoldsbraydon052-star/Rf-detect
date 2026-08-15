@@ -50,13 +50,17 @@ class AcousticFrequencyDetector(
         }
 
         return try {
-            val record = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize.coerceAtLeast(4096)
-            )
+            val record = AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.MIC)
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(channelConfig)
+                        .setEncoding(audioFormat)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize.coerceAtLeast(4096))
+                .build()
 
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()

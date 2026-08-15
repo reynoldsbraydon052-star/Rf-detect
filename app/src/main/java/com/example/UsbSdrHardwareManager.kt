@@ -34,9 +34,18 @@ interface SdrReceiverInterface {
     fun releaseReceiver()
 }
 
+data class ThermalFrame(
+    val width: Int = 160,
+    val height: Int = 120,
+    val minTempCelsius: Float = 21.0f,
+    val maxTempCelsius: Float = 36.5f,
+    val hotspotXRatio: Float = 0.5f,
+    val hotspotYRatio: Float = 0.5f
+)
+
 interface ThermalCameraReceiverInterface {
     fun initializeThermalCamera(): Boolean
-    fun startThermalStream(onThermalFrameReady: (android.graphics.Bitmap) -> Unit)
+    fun startThermalStream(onThermalFrameReady: (ThermalFrame) -> Unit)
     fun stopThermalStream()
     fun releaseThermalCamera()
 }
@@ -221,27 +230,21 @@ class UsbSdrHardwareManager(
         return true
     }
 
-    override fun startThermalStream(onThermalFrameReady: (android.graphics.Bitmap) -> Unit) {
+    override fun startThermalStream(onThermalFrameReady: (ThermalFrame) -> Unit) {
         if (isThermalStreaming) return
         isThermalStreaming = true
         thermalStreamingJob = streamingScope.launch {
-            var bitmap: android.graphics.Bitmap? = null
-            try {
-                bitmap = android.graphics.Bitmap.createBitmap(160, 120, android.graphics.Bitmap.Config.ARGB_8888)
-                val canvas = android.graphics.Canvas(bitmap)
-                val paint = android.graphics.Paint().apply {
-                    color = android.graphics.Color.YELLOW
-                    maskFilter = android.graphics.BlurMaskFilter(20f, android.graphics.BlurMaskFilter.Blur.NORMAL)
-                }
-                while (isActive && isThermalStreaming) {
-                    delay(150)
-                    canvas.drawColor(android.graphics.Color.HSVToColor(floatArrayOf(Random.nextFloat() * 20f + 200f, 0.8f, 0.4f)))
-                    canvas.drawCircle(80f + (Random.nextFloat() * 10f), 60f + (Random.nextFloat() * 10f), 30f, paint)
-                    
-                    onThermalFrameReady(bitmap)
-                }
-            } finally {
-                bitmap?.recycle()
+            while (isActive && isThermalStreaming) {
+                delay(150)
+                val frame = ThermalFrame(
+                    width = 160,
+                    height = 120,
+                    minTempCelsius = 19.5f + Random.nextFloat() * 1.5f,
+                    maxTempCelsius = 35.0f + Random.nextFloat() * 3.0f,
+                    hotspotXRatio = 0.45f + Random.nextFloat() * 0.1f,
+                    hotspotYRatio = 0.45f + Random.nextFloat() * 0.1f
+                )
+                onThermalFrameReady(frame)
             }
         }
     }
