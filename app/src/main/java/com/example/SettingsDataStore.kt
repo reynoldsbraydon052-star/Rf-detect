@@ -23,8 +23,23 @@ class SettingsDataStore(private val context: Context) {
         val KEY_ENABLED_CATEGORIES = stringSetPreferencesKey("enabled_categories")
         val KEY_BREACH_PERIMETER_METERS = intPreferencesKey("breach_perimeter_meters")
         val KEY_MAX_VISIBLE_DEVICES = intPreferencesKey("max_visible_devices")
+        val KEY_RADAR_GRID_MODE = androidx.datastore.preferences.core.stringPreferencesKey("radar_grid_mode")
+        val KEY_RADAR_GRID_OPACITY = androidx.datastore.preferences.core.floatPreferencesKey("radar_grid_opacity")
+        val KEY_SHOW_COVERAGE_ZONES = booleanPreferencesKey("show_coverage_zones")
 
         val DEFAULT_CATEGORIES = setOf("MOBILE", "AUDIO_WEAR", "IOT", "WIFI_AP", "BEACONS", "CELLULAR", "ACOUSTIC_EMF")
+    }
+
+    val radarGridModeStr: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_RADAR_GRID_MODE] ?: "POLAR"
+    }
+
+    val radarGridOpacity: Flow<Float> = context.dataStore.data.map { preferences ->
+        preferences[KEY_RADAR_GRID_OPACITY] ?: 0.25f
+    }
+
+    val showCoverageZones: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_SHOW_COVERAGE_ZONES] ?: true
     }
 
     val defaultRangeMeters: Flow<Int> = context.dataStore.data.map { preferences ->
@@ -104,6 +119,24 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updateMaxVisibleDevices(maxDevices: Int) {
         context.dataStore.edit { preferences ->
             preferences[KEY_MAX_VISIBLE_DEVICES] = maxDevices
+        }
+    }
+
+    suspend fun updateRadarGridMode(modeStr: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_RADAR_GRID_MODE] = modeStr
+        }
+    }
+
+    suspend fun updateRadarGridOpacity(opacity: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_RADAR_GRID_OPACITY] = opacity
+        }
+    }
+
+    suspend fun updateShowCoverageZones(show: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_SHOW_COVERAGE_ZONES] = show
         }
     }
 

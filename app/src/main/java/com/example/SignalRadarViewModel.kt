@@ -89,6 +89,33 @@ enum class PerimeterSensitivityPreset(
     )
 }
 
+enum class RadarGridMode(
+    val title: String,
+    val shortLabel: String,
+    val description: String
+) {
+    POLAR(
+        title = "Polar Azimuth & Range Rings",
+        shortLabel = "POLAR",
+        description = "Concentric distance rings with 30° radial azimuth spokes, distance sub-ticks, and cardinal headings."
+    ),
+    TACTICAL_MGRS(
+        title = "Tactical MGRS Metric Grid",
+        shortLabel = "MGRS",
+        description = "Cartesian military metric coordinate square grid (5m/10m boxes) with cross-tick intersection reticles."
+    ),
+    COVERAGE_ZONES(
+        title = "RF Coverage Density Bands",
+        shortLabel = "ZONES",
+        description = "Dynamic RF signal propagation zones: Near-Field (> -60dBm), Mid-Field, and Far-Field Fringe attenuation."
+    ),
+    OFF(
+        title = "Minimal Scope (Grid Off)",
+        shortLabel = "OFF",
+        description = "Minimalist uncluttered radar scope with outer bezel and cardinal axes."
+    )
+}
+
 enum class RadarTab {
     SWEEP_RADAR,
     FULL_RADAR,
@@ -137,6 +164,12 @@ data class SignalRadarUiState(
     val mapRangeMeters: Float = 30.0f,
     val selectedTargetDeviceId: String? = null,
     val isMapMaximized: Boolean = false,
+    // Configurable Radar Grid & Coverage Overlay State:
+    val radarGridMode: RadarGridMode = RadarGridMode.POLAR,
+    val radarGridOpacity: Float = 0.25f,
+    val showCoverageRings: Boolean = true,
+    val showDistanceTicks: Boolean = true,
+    val isRadarGridConfigDialogOpen: Boolean = false,
     // Full Screen Map Option & Phone Hardware Sensor Suite State:
     val isFullScreenMapVisible: Boolean = false,
     val fullScreenMapMode: String = "TACTICAL", // "TACTICAL", "HEATMAP", "SAT_GRID"
@@ -241,6 +274,26 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             settingsDataStore.maxVisibleDevices.collect { maxDevices ->
                 _uiState.update { it.copy(maxVisibleDevices = maxDevices) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.radarGridModeStr.collect { modeStr ->
+                val mode = try {
+                    RadarGridMode.valueOf(modeStr)
+                } catch (e: Exception) {
+                    RadarGridMode.POLAR
+                }
+                _uiState.update { it.copy(radarGridMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.radarGridOpacity.collect { opacity ->
+                _uiState.update { it.copy(radarGridOpacity = opacity.coerceIn(0.05f, 0.9f)) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.showCoverageZones.collect { show ->
+                _uiState.update { it.copy(showCoverageRings = show) }
             }
         }
 
@@ -950,6 +1003,52 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     fun toggleHudDeclutter(enabled: Boolean? = null) {
         _uiState.update { it.copy(isHudDeclutterEnabled = enabled ?: !it.isHudDeclutterEnabled) }
+    }
+
+    fun setRadarGridMode(mode: RadarGridMode) {
+        _uiState.update { it.copy(radarGridMode = mode) }
+        viewModelScope.launch {
+            settingsDataStore.updateRadarGridMode(mode.name)
+        }
+    }
+
+    fun cycleRadarGridMode() {
+        val current = _uiState.value.radarGridMode
+        val next = when (current) {
+            RadarGridMode.POLAR -> RadarGridMode.TACTICAL_MGRS
+            RadarGridMode.TACTICAL_MGRS -> RadarGridMode.COVERAGE_ZONES
+            RadarGridMode.COVERAGE_ZONES -> RadarGridMode.OFF
+            RadarGridMode.OFF -> RadarGridMode.POLAR
+        }
+        setRadarGridMode(next)
+    }
+
+    fun setRadarGridOpacity(opacity: Float) {
+        val clamped = opacity.coerceIn(0.05f, 0.85f)
+        _uiState.update { it.copy(radarGridOpacity = clamped) }
+        viewModelScope.launch {
+            settingsDataStore.updateRadarGridOpacity(clamped)
+        }
+    }
+
+    fun toggleCoverageRings() {
+        val next = !_uiState.value.showCoverageRings
+        _uiState.update { it.copy(showCoverageRings = next) }
+        viewModelScope.launch {
+            settingsDataStore.updateShowCoverageZones(next)
+        }
+    }
+
+    fun toggleDistanceTicks() {
+        _uiState.update { it.copy(showDistanceTicks = !it.showDistanceTicks) }
+    }
+
+    fun openRadarGridConfigDialog() {
+        _uiState.update { it.copy(isRadarGridConfigDialogOpen = true) }
+    }
+
+    fun closeRadarGridConfigDialog() {
+        _uiState.update { it.copy(isRadarGridConfigDialogOpen = false) }
     }
 
     fun setSortByPriority(sort: String) {

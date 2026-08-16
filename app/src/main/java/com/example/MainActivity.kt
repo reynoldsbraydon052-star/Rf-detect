@@ -655,7 +655,9 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onSetSortBy = { viewModel.setSortByPriority(it) },
                             onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
                             onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
-                            onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
+                            onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() },
+                            onCycleRadarGridMode = { viewModel.cycleRadarGridMode() },
+                            onOpenRadarGridConfig = { viewModel.openRadarGridConfigDialog() }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -788,6 +790,20 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
                     onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
                     onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
+                )
+            }
+
+            if (uiState.isRadarGridConfigDialogOpen) {
+                RadarGridConfigDialog(
+                    currentMode = uiState.radarGridMode,
+                    currentOpacity = uiState.radarGridOpacity,
+                    showCoverageRings = uiState.showCoverageRings,
+                    showDistanceTicks = uiState.showDistanceTicks,
+                    onSelectMode = { viewModel.setRadarGridMode(it) },
+                    onSetOpacity = { viewModel.setRadarGridOpacity(it) },
+                    onToggleCoverageRings = { viewModel.toggleCoverageRings() },
+                    onToggleDistanceTicks = { viewModel.toggleDistanceTicks() },
+                    onDismiss = { viewModel.closeRadarGridConfigDialog() }
                 )
             }
         }
@@ -1250,6 +1266,8 @@ fun SweepRadarScreen(
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
     onCycleRadarBoost: () -> Unit = {},
     onRunAiDeepAudit: () -> Unit = {},
+    onCycleRadarGridMode: () -> Unit = {},
+    onOpenRadarGridConfig: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(
@@ -1330,7 +1348,13 @@ fun SweepRadarScreen(
                         onToggleFocusMode = onToggleFocusMode,
                         onSetMaxDevices = onSetMaxDevices,
                         onCycleRadarBoost = onCycleRadarBoost,
-                        onTriggerAiPinpoint = onTriggerAiPinpoint
+                        onTriggerAiPinpoint = onTriggerAiPinpoint,
+                        radarGridMode = uiState.radarGridMode,
+                        radarGridOpacity = uiState.radarGridOpacity,
+                        showCoverageRings = uiState.showCoverageRings,
+                        showDistanceTicks = uiState.showDistanceTicks,
+                        onCycleRadarGridMode = onCycleRadarGridMode,
+                        onOpenRadarGridConfig = onOpenRadarGridConfig
                     )
 
                     Surface(
@@ -1455,28 +1479,14 @@ fun SweepRadarScreen(
                     onSetMaxDevices = onSetMaxDevices,
                     onCycleRadarBoost = onCycleRadarBoost,
                     onTriggerAiPinpoint = onTriggerAiPinpoint,
+                    radarGridMode = uiState.radarGridMode,
+                    radarGridOpacity = uiState.radarGridOpacity,
+                    showCoverageRings = uiState.showCoverageRings,
+                    showDistanceTicks = uiState.showDistanceTicks,
+                    onCycleRadarGridMode = onCycleRadarGridMode,
+                    onOpenRadarGridConfig = onOpenRadarGridConfig,
                     modifier = Modifier.fillMaxSize()
                 )
-
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp),
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color.Black.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                ) {
-                    Text(
-                        text = "HEADING: ${uiState.headingDegrees.toInt()}°",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 9.sp
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
             }
 
             // Bottom Bar Actions in Portrait (AI Deep Audit + Tactical Controls Sheet)

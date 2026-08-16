@@ -13,8 +13,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
@@ -38,9 +41,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Mutable internal tracker representation for 60fps deconfliction calculations without allocations.
@@ -68,6 +74,10 @@ fun TacticalRadarCanvas(
     isFocusModeEnabled: Boolean = false,
     maxVisibleDevices: Int = 10,
     radarBoostLevel: RadarBoostLevel = RadarBoostLevel.NORMAL_1X,
+    radarGridMode: RadarGridMode = RadarGridMode.POLAR,
+    radarGridOpacity: Float = 0.25f,
+    showCoverageRings: Boolean = true,
+    showDistanceTicks: Boolean = true,
     onZoomIn: () -> Unit = {},
     onZoomOut: () -> Unit = {},
     onSetMapRange: (Float) -> Unit = {},
@@ -80,6 +90,8 @@ fun TacticalRadarCanvas(
     onSetMaxDevices: (Int) -> Unit = {},
     onCycleRadarBoost: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
+    onCycleRadarGridMode: () -> Unit = {},
+    onOpenRadarGridConfig: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Continuous 360-degree radar sweep beam animation
@@ -113,7 +125,17 @@ fun TacticalRadarCanvas(
     val textPaint = remember {
         android.graphics.Paint().apply {
             color = android.graphics.Color.parseColor("#00FF66")
-            textSize = 26f
+            textSize = 24f
+            isAntiAlias = true
+            typeface = android.graphics.Typeface.MONOSPACE
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
+
+    val subTextPaint = remember {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.parseColor("#9900FF66")
+            textSize = 19f
             isAntiAlias = true
             typeface = android.graphics.Typeface.MONOSPACE
             textAlign = android.graphics.Paint.Align.CENTER
@@ -150,7 +172,6 @@ fun TacticalRadarCanvas(
     }
 
     val radarGreen = Color(0xFF00FF66)
-    val gridDark = Color(0xFF00FF66).copy(alpha = 0.25f)
     val breachRed = Color(0xFFFF3366)
     val wifiGreen = Color(0xFF00FF66)
     val cellRed = Color(0xFFFF3366)
@@ -166,22 +187,319 @@ fun TacticalRadarCanvas(
         modifier
     }
 
-    Box(
+    Column(
         modifier = containerModifier
-            .testTag("tactical_radar_container")
+            .testTag("tactical_radar_container"),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // High-Performance Dual-Layer Canvas Architecture:
-        // 1. drawBehind handles static/cached background grid, compass rings, and floorplan
-        // 2. Canvas handles dynamic 60fps sweep rays, active device tracks, and target vectors
-        Canvas(
+        // Dedicated Top Radar HUD Control Bar (Outside the canvas so it never blocks the radar circle)
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .testTag("tactical_radar_canvas")
-                .drawBehind {
-                    val centerX = size.width / 2f
-                    val centerY = size.height / 2f
-                    val maxRadius = min(centerX, centerY) - 44f
-                    val maxDistanceRange = mapRangeMeters.coerceAtLeast(2.0f)
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Range Meter Selector Segmented Chips
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "RANGE:",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color.Gray
+                )
+
+                listOf(5f, 15f, 30f, 60f).forEach { rangePreset ->
+                    val isSelected = mapRangeMeters.toInt() == rangePreset.toInt()
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (isSelected) Color(0xFF00FF66) else Color(0xFF0D1D14),
+                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF00FF66) else Color(0xFF00FF66).copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .clickable { onSetMapRange(rangePreset) }
+                            .testTag("range_chip_${rangePreset.toInt()}m")
+                    ) {
+                        Text(
+                            text = "${rangePreset.toInt()}m",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (isSelected) Color.Black else Color(0xFF00FF66),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+
+            // Quick Status Chips & Actions Bar
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Radar Grid Mode Pill & Config Button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = when (radarGridMode) {
+                        RadarGridMode.POLAR -> Color(0xFF0D281E)
+                        RadarGridMode.TACTICAL_MGRS -> Color(0xFF0C2433)
+                        RadarGridMode.COVERAGE_ZONES -> Color(0xFF28200C)
+                        RadarGridMode.OFF -> Color(0xFF1E1416)
+                    },
+                    border = BorderStroke(
+                        1.dp,
+                        when (radarGridMode) {
+                            RadarGridMode.POLAR -> Color(0xFF00FF66).copy(alpha = 0.6f)
+                            RadarGridMode.TACTICAL_MGRS -> Color(0xFF00E5FF).copy(alpha = 0.7f)
+                            RadarGridMode.COVERAGE_ZONES -> Color(0xFFFFCC00).copy(alpha = 0.7f)
+                            RadarGridMode.OFF -> Color(0xFFFF3366).copy(alpha = 0.5f)
+                        }
+                    ),
+                    modifier = Modifier
+                        .clickable { onCycleRadarGridMode() }
+                        .testTag("radar_hud_grid_mode_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Grid4x4,
+                            contentDescription = "Radar Grid Mode",
+                            tint = when (radarGridMode) {
+                                RadarGridMode.POLAR -> Color(0xFF00FF66)
+                                RadarGridMode.TACTICAL_MGRS -> Color(0xFF00E5FF)
+                                RadarGridMode.COVERAGE_ZONES -> Color(0xFFFFCC00)
+                                RadarGridMode.OFF -> Color(0xFFFF3366)
+                            },
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Text(
+                            text = radarGridMode.shortLabel,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = when (radarGridMode) {
+                                RadarGridMode.POLAR -> Color(0xFF00FF66)
+                                RadarGridMode.TACTICAL_MGRS -> Color(0xFF00E5FF)
+                                RadarGridMode.COVERAGE_ZONES -> Color(0xFFFFCC00)
+                                RadarGridMode.OFF -> Color(0xFFFF3366)
+                            }
+                        )
+                    }
+                }
+
+                // Grid Settings Gear Icon
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF0F1E17),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .clickable { onOpenRadarGridConfig() }
+                        .testTag("radar_hud_grid_config_gear_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Configure Grid",
+                        tint = Color(0xFF00FF66),
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp, vertical = 3.dp)
+                            .size(12.dp)
+                    )
+                }
+
+                // Radar Gain / Sensitivity Boost Chip
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (radarBoostLevel != RadarBoostLevel.NORMAL_1X) radarBoostLevel.badgeColor.copy(alpha = 0.25f) else Color(0xFF0F1E17),
+                    border = BorderStroke(1.dp, radarBoostLevel.badgeColor),
+                    modifier = Modifier
+                        .clickable { onCycleRadarBoost() }
+                        .testTag("radar_hud_boost_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = "Radar Boost",
+                            tint = radarBoostLevel.badgeColor,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = radarBoostLevel.label,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = radarBoostLevel.badgeColor
+                        )
+                    }
+                }
+
+                // Quick HUD Focus Mode Pill
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF0F1E17),
+                    border = BorderStroke(1.dp, if (isFocusModeEnabled) Color(0xFFFFE066) else Color(0xFF00FF66).copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .clickable { onToggleFocusMode() }
+                        .testTag("radar_hud_focus_pill")
+                ) {
+                    Text(
+                        text = if (isFocusModeEnabled) "FOCUS" else "FOC",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = if (isFocusModeEnabled) Color.Black else Color(0xFF00FF66),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                    )
+                }
+
+                // Quick Limit cycle button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF101C16),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .clickable {
+                            val next = when (maxVisibleDevices) {
+                                3 -> 5
+                                5 -> 10
+                                10 -> 25
+                                25 -> 0
+                                else -> 3
+                            }
+                            onSetMaxDevices(next)
+                        }
+                        .testTag("radar_hud_limit_cycle_button")
+                ) {
+                    Text(
+                        text = if (maxVisibleDevices == 0) "ALL" else "L:$maxVisibleDevices",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00E5FF),
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                    )
+                }
+
+                // Floorplan toggle button
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isFloorplanEnabled) Color(0xFFFFCC00) else Color(0xFF122230),
+                    border = BorderStroke(1.dp, if (isFloorplanEnabled) Color.Yellow else Color(0xFF00E5FF).copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .clickable { onToggleFloorplan() }
+                        .testTag("toggle_floorplan_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Toggle Floorplan",
+                        tint = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF),
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp, vertical = 3.dp)
+                            .size(13.dp)
+                    )
+                }
+
+                // Zoom In
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF0D1D14),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable { onZoomIn() }
+                        .testTag("radar_zoom_in_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Zoom In",
+                            tint = Color(0xFF00FF66),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+
+                // Zoom Out
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF0D1D14),
+                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable { onZoomOut() }
+                        .testTag("radar_zoom_out_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Remove,
+                            contentDescription = "Zoom Out",
+                            tint = Color(0xFF00FF66),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+
+                // Full Screen Map / Maximize
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF081C26),
+                    border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable { onOpenFullScreenMap() }
+                        .testTag("open_fullscreen_map_pill_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Fullscreen,
+                            contentDescription = "Full Screen Map",
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Radar Canvas Box - 100% Unobstructed Scope Area
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            // High-Performance Dual-Layer Canvas Architecture:
+            // 1. drawBehind handles static/cached background grid, compass rings, and floorplan
+            // 2. Canvas handles dynamic 60fps sweep rays, active device tracks, and target vectors
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("tactical_radar_canvas")
+                    .drawBehind {
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
+                        val maxRadius = min(centerX, centerY) - 28f
+                        val maxDistanceRange = mapRangeMeters.coerceAtLeast(2.0f)
 
                     // Optional GPU-accelerated Tactical Floorplan Blueprint Layer
                     if (isFloorplanEnabled) {
@@ -196,34 +514,198 @@ fun TacticalRadarCanvas(
                         // Outer Boundary Bezel
                         drawCircle(color = radarGreen, radius = maxRadius, style = Stroke(width = 3f))
 
-                        // Concentric Range Rings (75%, 50%, 25%)
-                        drawCircle(color = gridDark, radius = maxRadius * 0.75f, style = Stroke(width = 1.5f))
-                        drawCircle(color = gridDark, radius = maxRadius * 0.50f, style = Stroke(width = 1.5f))
-                        drawCircle(color = gridDark, radius = maxRadius * 0.25f, style = Stroke(width = 1.5f))
+                        val gridColor = radarGreen.copy(alpha = radarGridOpacity.coerceIn(0.05f, 0.9f))
+                        val subGridColor = radarGreen.copy(alpha = (radarGridOpacity * 0.5f).coerceIn(0.02f, 0.45f))
+                        val axisColor = Color(0xFF00E5FF).copy(alpha = (radarGridOpacity * 1.5f).coerceIn(0.15f, 0.95f))
+
+                        when (radarGridMode) {
+                            RadarGridMode.POLAR -> {
+                                // Concentric Distance Range Rings (100%, 75%, 50%, 25%, and subtle intermediate sub-rings)
+                                drawCircle(color = gridColor, radius = maxRadius * 0.75f, style = Stroke(width = 1.5f))
+                                drawCircle(color = gridColor, radius = maxRadius * 0.50f, style = Stroke(width = 1.5f))
+                                drawCircle(color = gridColor, radius = maxRadius * 0.25f, style = Stroke(width = 1.5f))
+
+                                // Subtle intermediate range rings
+                                drawCircle(color = subGridColor, radius = maxRadius * 0.875f, style = Stroke(width = 1f, pathEffect = dashEffect))
+                                drawCircle(color = subGridColor, radius = maxRadius * 0.625f, style = Stroke(width = 1f, pathEffect = dashEffect))
+                                drawCircle(color = subGridColor, radius = maxRadius * 0.375f, style = Stroke(width = 1f, pathEffect = dashEffect))
+                                drawCircle(color = subGridColor, radius = maxRadius * 0.125f, style = Stroke(width = 1f, pathEffect = dashEffect))
+
+                                // 8-Point Radial Spokes (45, 135, 225, 315)
+                                for (angle in listOf(45.0, 135.0, 225.0, 315.0)) {
+                                    val rad = Math.toRadians(angle)
+                                    val cosA = cos(rad).toFloat()
+                                    val sinA = sin(rad).toFloat()
+                                    drawLine(
+                                        color = subGridColor,
+                                        start = Offset(centerX - maxRadius * sinA, centerY + maxRadius * cosA),
+                                        end = Offset(centerX + maxRadius * sinA, centerY - maxRadius * cosA),
+                                        strokeWidth = 1f,
+                                        pathEffect = dashEffect
+                                    )
+                                }
+
+                                // Polar Primary Crosshair Axes
+                                drawLine(
+                                    color = axisColor,
+                                    start = Offset(centerX, centerY - maxRadius),
+                                    end = Offset(centerX, centerY + maxRadius),
+                                    strokeWidth = 1.5f
+                                )
+                                drawLine(
+                                    color = axisColor,
+                                    start = Offset(centerX - maxRadius, centerY),
+                                    end = Offset(centerX + maxRadius, centerY),
+                                    strokeWidth = 1.5f
+                                )
+
+                                // Polar Distance Tick Marks along axes
+                                if (showDistanceTicks) {
+                                    for (step in 1..4) {
+                                        val frac = step * 0.25f
+                                        val distLabel = "${(maxDistanceRange * frac).toInt()}m"
+                                        val r = maxRadius * frac
+                                        drawLine(
+                                            color = gridColor,
+                                            start = Offset(centerX - 6f, centerY - r),
+                                            end = Offset(centerX + 6f, centerY - r),
+                                            strokeWidth = 2f
+                                        )
+                                        drawContext.canvas.nativeCanvas.drawText(
+                                            distLabel,
+                                            centerX + 22f,
+                                            centerY - r + 6f,
+                                            subTextPaint
+                                        )
+                                    }
+                                }
+                            }
+
+                            RadarGridMode.TACTICAL_MGRS -> {
+                                // Rectangular / Cartesian MGRS Metric Grid Mesh
+                                val gridDivisions = 8
+                                val stepPx = (maxRadius * 2f) / gridDivisions
+                                val mgrsColor = Color(0xFF00E5FF).copy(alpha = radarGridOpacity.coerceIn(0.08f, 0.8f))
+                                val mgrsSubColor = Color(0xFF00E5FF).copy(alpha = (radarGridOpacity * 0.45f).coerceIn(0.03f, 0.4f))
+
+                                for (i in 1 until gridDivisions) {
+                                    val offsetFromLeft = (centerX - maxRadius) + i * stepPx
+                                    val offsetFromTop = (centerY - maxRadius) + i * stepPx
+
+                                    val dx = offsetFromLeft - centerX
+                                    val chordHalfY = sqrt((maxRadius * maxRadius - dx * dx).coerceAtLeast(0f))
+                                    if (chordHalfY > 2f) {
+                                        drawLine(
+                                            color = if (i == gridDivisions / 2) axisColor else mgrsSubColor,
+                                            start = Offset(offsetFromLeft, centerY - chordHalfY),
+                                            end = Offset(offsetFromLeft, centerY + chordHalfY),
+                                            strokeWidth = if (i == gridDivisions / 2) 1.5f else 1f,
+                                            pathEffect = if (i == gridDivisions / 2) null else dashEffect
+                                        )
+                                    }
+
+                                    val dy = offsetFromTop - centerY
+                                    val chordHalfX = sqrt((maxRadius * maxRadius - dy * dy).coerceAtLeast(0f))
+                                    if (chordHalfX > 2f) {
+                                        drawLine(
+                                            color = if (i == gridDivisions / 2) axisColor else mgrsSubColor,
+                                            start = Offset(centerX - chordHalfX, offsetFromTop),
+                                            end = Offset(centerX + chordHalfX, offsetFromTop),
+                                            strokeWidth = if (i == gridDivisions / 2) 1.5f else 1f,
+                                            pathEffect = if (i == gridDivisions / 2) null else dashEffect
+                                        )
+                                    }
+                                }
+
+                                // Concentric reference rings
+                                drawCircle(color = mgrsColor, radius = maxRadius * 0.50f, style = Stroke(width = 1f, pathEffect = dashEffect))
+
+                                if (showDistanceTicks) {
+                                    val meterPerGrid = (maxDistanceRange * 2f / gridDivisions)
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        "GRID: ${meterPerGrid.toInt()}m/div",
+                                        centerX,
+                                        centerY + maxRadius - 16f,
+                                        subTextPaint
+                                    )
+                                }
+                            }
+
+                            RadarGridMode.COVERAGE_ZONES -> {
+                                // Theoretical RF Propagation Zones & Signal Envelopes
+                                val immediateFrac = (3.0f / maxDistanceRange).coerceIn(0.10f, 0.40f)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(Color(0xFF00FF66).copy(alpha = radarGridOpacity * 0.35f), Color.Transparent),
+                                        center = Offset(centerX, centerY),
+                                        radius = maxRadius * immediateFrac
+                                    ),
+                                    radius = maxRadius * immediateFrac,
+                                    style = Fill
+                                )
+                                drawCircle(
+                                    color = Color(0xFF00FF66).copy(alpha = radarGridOpacity * 0.8f),
+                                    radius = maxRadius * immediateFrac,
+                                    style = Stroke(width = 1.5f, pathEffect = dashEffect)
+                                )
+
+                                val losFrac = (12.0f / maxDistanceRange).coerceIn(0.35f, 0.70f)
+                                drawCircle(
+                                    color = Color(0xFF00E5FF).copy(alpha = radarGridOpacity * 0.6f),
+                                    radius = maxRadius * losFrac,
+                                    style = Stroke(width = 1.5f, pathEffect = dashEffect)
+                                )
+
+                                drawCircle(
+                                    color = Color(0xFFFFCC00).copy(alpha = radarGridOpacity * 0.5f),
+                                    radius = maxRadius * 0.85f,
+                                    style = Stroke(width = 1.5f, pathEffect = dashEffect)
+                                )
+
+                                drawLine(color = gridColor, start = Offset(centerX, centerY - maxRadius), end = Offset(centerX, centerY + maxRadius), strokeWidth = 1f)
+                                drawLine(color = gridColor, start = Offset(centerX - maxRadius, centerY), end = Offset(centerX + maxRadius, centerY), strokeWidth = 1f)
+
+                                if (showDistanceTicks) {
+                                    drawContext.canvas.nativeCanvas.drawText("BLE PROXIMITY (<3m)", centerX, centerY - maxRadius * immediateFrac + 14f, subTextPaint)
+                                    drawContext.canvas.nativeCanvas.drawText("RF LOS ZONE", centerX, centerY - maxRadius * losFrac + 14f, subTextPaint)
+                                }
+                            }
+
+                            RadarGridMode.OFF -> {
+                                drawLine(
+                                    color = gridColor.copy(alpha = 0.15f),
+                                    start = Offset(centerX, centerY - 15f),
+                                    end = Offset(centerX, centerY + 15f),
+                                    strokeWidth = 1.5f
+                                )
+                                drawLine(
+                                    color = gridColor.copy(alpha = 0.15f),
+                                    start = Offset(centerX - 15f, centerY),
+                                    end = Offset(centerX + 15f, centerY),
+                                    strokeWidth = 1.5f
+                                )
+                            }
+                        }
 
                         // Micro-Perimeter Danger Ring
                         val perimeterRadius = (perimeterThresholdMeters / maxDistanceRange) * maxRadius
                         if (perimeterRadius.toDouble() <= maxRadius.toDouble()) {
                             drawCircle(
-                                color = breachRed.copy(alpha = 0.8f),
+                                color = breachRed.copy(alpha = 0.85f),
                                 radius = perimeterRadius,
                                 style = Stroke(width = 2.5f)
                             )
                         }
 
-                        // Polar Crosshair Axes
-                        drawLine(
-                            color = gridDark,
-                            start = Offset(centerX, centerY - maxRadius),
-                            end = Offset(centerX, centerY + maxRadius),
-                            strokeWidth = 1.5f
-                        )
-                        drawLine(
-                            color = gridDark,
-                            start = Offset(centerX - maxRadius, centerY),
-                            end = Offset(centerX + maxRadius, centerY),
-                            strokeWidth = 1.5f
-                        )
+                        // Optional Coverage Rings for active Blip Types
+                        if (showCoverageRings && radarGridMode != RadarGridMode.OFF) {
+                            val bleMaxRadius = (15.0f / maxDistanceRange).coerceIn(0.15f, 0.95f) * maxRadius
+                            drawCircle(
+                                color = Color(0xFF00E5FF).copy(alpha = (radarGridOpacity * 0.35f).coerceIn(0.02f, 0.25f)),
+                                radius = bleMaxRadius,
+                                style = Stroke(width = 1f, pathEffect = dashEffect)
+                            )
+                        }
 
                         // Compass Cardinal Direction Labels (N, E, S, W)
                         drawContext.canvas.nativeCanvas.drawText("N", centerX, centerY - maxRadius - 12f, textPaint)
@@ -240,18 +722,14 @@ fun TacticalRadarCanvas(
                                 warningTextPaint
                             )
                         }
-                        drawContext.canvas.nativeCanvas.drawText(
-                            "${maxDistanceRange.toInt()}m",
-                            centerX,
-                            centerY - maxRadius + 22f,
-                            textPaint
-                        )
-                        drawContext.canvas.nativeCanvas.drawText(
-                            "${(maxDistanceRange * 0.5f).toInt()}m",
-                            centerX,
-                            centerY - (maxRadius * 0.5f) + 18f,
-                            textPaint
-                        )
+                        if (showDistanceTicks && radarGridMode != RadarGridMode.OFF) {
+                            drawContext.canvas.nativeCanvas.drawText(
+                                "${maxDistanceRange.toInt()}m",
+                                centerX,
+                                centerY - maxRadius + 22f,
+                                textPaint
+                            )
+                        }
                     }
 
                     // Static Heading Orientation Arrow (Cyan)
@@ -602,266 +1080,13 @@ fun TacticalRadarCanvas(
             }
         }
 
-        // Overlay Controls Top Right: Zoom In, Zoom Out, Expand Map
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.6f)),
-                modifier = Modifier
-                    .size(36.dp)
-                    .clickable { onZoomIn() }
-                    .testTag("radar_zoom_in_button")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Zoom In",
-                        tint = Color(0xFF00FF66),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.6f)),
-                modifier = Modifier
-                    .size(36.dp)
-                    .clickable { onZoomOut() }
-                    .testTag("radar_zoom_out_button")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Remove,
-                        contentDescription = "Zoom Out",
-                        tint = Color(0xFF00FF66),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
-                modifier = Modifier
-                    .size(36.dp)
-                    .clickable { onToggleMaximizeMap() }
-                    .testTag("radar_expand_map_button")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isMapMaximized) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                        contentDescription = "Resize Map View",
-                        tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        // Overlay Range Presets Chips & Quick HUD Pills Top Left
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Radar Gain / Sensitivity Boost Chip
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = if (radarBoostLevel != RadarBoostLevel.NORMAL_1X) radarBoostLevel.badgeColor.copy(alpha = 0.25f) else Color(0xFF0F1E17),
-                border = BorderStroke(1.dp, radarBoostLevel.badgeColor),
-                modifier = Modifier
-                    .clickable { onCycleRadarBoost() }
-                    .testTag("radar_hud_boost_chip")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = "Radar Boost",
-                        tint = radarBoostLevel.badgeColor,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = "BOOST: ${radarBoostLevel.label}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = radarBoostLevel.badgeColor
-                    )
-                }
-            }
-
-            // Quick HUD Focus Mode Pill
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = if (isFocusModeEnabled) Color(0xFFFFCC00) else Color(0xFF0F1E17),
-                border = BorderStroke(1.dp, if (isFocusModeEnabled) Color(0xFFFFE066) else Color(0xFF00FF66).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .clickable { onToggleFocusMode() }
-                    .testTag("radar_hud_focus_pill")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Focus",
-                        tint = if (isFocusModeEnabled) Color.Black else Color(0xFF00FF66),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = if (isFocusModeEnabled) "FOCUS: ON" else "FOCUS",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = if (isFocusModeEnabled) Color.Black else Color(0xFF00FF66)
-                    )
-                }
-            }
-
-            // Quick Limit cycle button (e.g. 5 -> 10 -> 25 -> ALL -> 3)
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color(0xFF101C16),
-                border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .clickable {
-                        val next = when (maxVisibleDevices) {
-                            3 -> 5
-                            5 -> 10
-                            10 -> 25
-                            25 -> 0
-                            else -> 3
-                        }
-                        onSetMaxDevices(next)
-                    }
-                    .testTag("radar_hud_limit_cycle_button")
-            ) {
-                Text(
-                    text = if (maxVisibleDevices == 0) "LIM: ALL" else "LIM: $maxVisibleDevices",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = Color(0xFF00E5FF),
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                )
-            }
-
-            listOf(5f, 15f, 30f, 60f).forEach { rangePreset ->
-                val isSelected = mapRangeMeters.toInt() == rangePreset.toInt()
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (isSelected) Color(0xFF00FF66) else MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                    border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
-                    modifier = Modifier
-                        .clickable { onSetMapRange(rangePreset) }
-                        .testTag("range_chip_${rangePreset.toInt()}m")
-                ) {
-                    Text(
-                        text = "${rangePreset.toInt()}m",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = if (isSelected) Color.Black else Color(0xFF00FF66),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                    )
-                }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = if (isFloorplanEnabled) Color(0xFFFFCC00) else Color(0xFF122230),
-                border = BorderStroke(1.dp, if (isFloorplanEnabled) Color.Yellow else Color(0xFF00E5FF).copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .clickable { onToggleFloorplan() }
-                    .testTag("toggle_floorplan_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Toggle Floorplan",
-                        tint = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF),
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = if (isFloorplanEnabled) "FLOORPLAN: ON" else "FLOORPLAN",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = if (isFloorplanEnabled) Color.Black else Color(0xFF00E5FF)
-                    )
-                }
-            }
-
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color(0xFF00E5FF),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.8f)),
-                modifier = Modifier
-                    .clickable { onOpenFullScreenMap() }
-                    .testTag("open_fullscreen_map_pill_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Fullscreen,
-                        contentDescription = "Full Screen Map",
-                        tint = Color.Black,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "FULL SCREEN MAP",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        color = Color.Black
-                    )
-                }
-            }
-        }
-
-        // Target Lock Info Status Banner Bottom Center
+        // Target Lock Info Status Banner Bottom Center (Unobtrusive floating pill)
         if (selectedTargetDeviceId != null) {
             val lockedBlip = blips.find { it.id == selectedTargetDeviceId || it.name == selectedTargetDeviceId }
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 10.dp),
+                    .padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -927,6 +1152,282 @@ fun TacticalRadarCanvas(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+}
+
+/**
+ * Tactical Dialog for configuring Radar Grid Mode, Opacity, Distance Ticks, and Coverage Zones.
+ */
+@Composable
+fun RadarGridConfigDialog(
+    currentMode: RadarGridMode,
+    currentOpacity: Float,
+    showCoverageRings: Boolean,
+    showDistanceTicks: Boolean,
+    onSelectMode: (RadarGridMode) -> Unit,
+    onSetOpacity: (Float) -> Unit,
+    onToggleCoverageRings: () -> Unit,
+    onToggleDistanceTicks: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .testTag("radar_grid_config_dialog"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1612)),
+            border = BorderStroke(1.5.dp, Color(0xFF00FF66).copy(alpha = 0.5f))
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GridOn,
+                            contentDescription = "Radar Grid",
+                            tint = Color(0xFF00FF66),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "RADAR GRID OVERLAY",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                            Text(
+                                text = "Distance Estimation & Signal Envelopes",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.Gray
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF1E3A2B))
+
+                // Grid Style Modes
+                Text(
+                    text = "GRID PATTERN STYLE",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    ),
+                    color = Color.White
+                )
+
+                RadarGridMode.values().forEach { mode ->
+                    val isSelected = mode == currentMode
+                    Surface(
+                        onClick = { onSelectMode(mode) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) Color(0xFF132B20) else Color(0xFF0F1B16),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isSelected) Color(0xFF00FF66) else Color(0xFF1E3A2B)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grid_mode_option_${mode.name}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { onSelectMode(mode) },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = Color(0xFF00FF66),
+                                    unselectedColor = Color.Gray
+                                )
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = mode.title,
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = if (isSelected) Color(0xFF00FF66) else Color.White
+                                )
+                                Text(
+                                    text = mode.description,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = Color.LightGray
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF1E3A2B))
+
+                // Grid Opacity Slider
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "GRID LINE OPACITY",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            ),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "${(currentOpacity * 100).toInt()}% (${if (currentOpacity < 0.2f) "SUBTLE" else if (currentOpacity < 0.4f) "BALANCED" else "HIGH"})",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color(0xFF00FF66)
+                        )
+                    }
+
+                    Slider(
+                        value = currentOpacity,
+                        onValueChange = onSetOpacity,
+                        valueRange = 0.08f..0.75f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF00FF66),
+                            activeTrackColor = Color(0xFF00FF66),
+                            inactiveTrackColor = Color(0xFF1E3A2B)
+                        ),
+                        modifier = Modifier.testTag("radar_grid_opacity_slider")
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFF1E3A2B))
+
+                // Toggles for Sub-Ticks & Coverage Bands
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Distance Metric Annotations",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Render meter distance numerical labels along radar rings & axes",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 10.5.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = showDistanceTicks,
+                        onCheckedChange = { onToggleDistanceTicks() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = Color(0xFF00FF66)
+                        )
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Wi-Fi & BLE Coverage Envelopes",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Display expected theoretical RF propagation radiuses",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 10.5.sp,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = showCoverageRings,
+                        onCheckedChange = { onToggleCoverageRings() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = Color(0xFF00FF66)
+                        )
+                    )
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("close_grid_config_button"),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00FF66),
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Text(
+                        text = "APPLY & CLOSE",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    )
                 }
             }
         }
