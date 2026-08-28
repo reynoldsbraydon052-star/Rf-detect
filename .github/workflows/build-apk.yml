@@ -28,9 +28,9 @@ jobs:
     - name: Build Debug APK
       run: |
         if [ -f "./gradlew" ]; then
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-configuration-cache
         else
-          gradle assembleDebug
+          gradle assembleDebug --no-configuration-cache
         fi
 
     - name: Upload APK Artifact
