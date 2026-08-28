@@ -177,7 +177,7 @@ fun TacticalScannerScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .statusBarsPadding()
                     .testTag("tactical_scanner_header_card"),
                 color = Color(0xFF0A140E),
                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f)),
@@ -747,13 +747,13 @@ fun TacticalScannerScreen(
                                 if (searchQuery.isNotEmpty()) {
                                     IconButton(
                                         onClick = { searchQuery = "" },
-                                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        modifier = Modifier.size(16.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Close,
                                             contentDescription = "Clear Search",
                                             tint = Color.Gray,
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(12.dp)
                                         )
                                     }
                                 }
@@ -764,7 +764,7 @@ fun TacticalScannerScreen(
                         Button(
                             onClick = { isDeviceListExpanded = !isDeviceListExpanded },
                             modifier = Modifier
-                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .height(40.dp)
                                 .testTag("toggle_device_list_button"),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -800,7 +800,6 @@ fun TacticalScannerScreen(
                             val isSelected = uiState.selectedFilterType == type
                             Surface(
                                 modifier = Modifier
-                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                                     .clickable { onFilterSelected(type) }
                                     .testTag("filter_chip_$type"),
                                 shape = RoundedCornerShape(16.dp),
@@ -810,20 +809,16 @@ fun TacticalScannerScreen(
                                     color = if (isSelected) Color(0xFF00FF66) else Color(0xFF00FF66).copy(alpha = 0.2f)
                                 )
                             ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
+                                Text(
+                                    text = type,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal
+                                    ),
+                                    color = if (isSelected) Color(0xFF00FF66) else Color.Gray,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = type,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 9.sp,
-                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal
-                                        ),
-                                        color = if (isSelected) Color(0xFF00FF66) else Color.Gray
-                                    )
-                                }
+                                )
                             }
                         }
 
@@ -833,14 +828,14 @@ fun TacticalScannerScreen(
                         IconButton(
                             onClick = { showMaskedAddresses = !showMaskedAddresses },
                             modifier = Modifier
-                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .size(24.dp)
                                 .testTag("scanner_toggle_mask_button")
                         ) {
                             Icon(
                                 imageVector = if (showMaskedAddresses) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                 contentDescription = "Toggle MAC masking",
                                 tint = Color(0xFF00FF66).copy(alpha = 0.8f),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }
@@ -1013,9 +1008,9 @@ fun TacticalScannerScreen(
                                                         Button(
                                                             onClick = { onSelectTargetDevice(if (isSelected) null else blip.id) },
                                                             modifier = Modifier
-                                                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                                                .height(24.dp)
                                                                 .testTag("lock_action_${blip.id}"),
-                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                                                             shape = RoundedCornerShape(4.dp),
                                                             colors = ButtonDefaults.buttonColors(
                                                                 containerColor = if (isSelected) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF00FF66).copy(alpha = 0.1f),
@@ -1086,7 +1081,7 @@ fun TacticalScannerScreen(
                         onClick = { isControlsExpanded = !isControlsExpanded },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .height(40.dp)
                             .testTag("toggle_advanced_controls_button"),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -1169,13 +1164,13 @@ fun TacticalScannerScreen(
                                     )
                                     IconButton(
                                         onClick = { onPlayTestPing(1200.0) },
-                                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.VolumeUp,
                                             contentDescription = "Test sound",
                                             tint = Color(0xFF00FF66),
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
@@ -1318,7 +1313,6 @@ fun TacticalScannerScreen(
                             containerColor = Color(0xFFFF3366),
                             contentColor = Color.White
                         ),
-                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
@@ -1372,7 +1366,6 @@ fun TacticalScannerScreen(
                         color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.15f) else Color.Transparent,
                         modifier = Modifier
                             .weight(1f)
-                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                             .testTag("scanner_bottom_tab_${tab.name.lowercase()}")
                     ) {
                         Column(
