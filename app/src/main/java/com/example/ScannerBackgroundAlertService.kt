@@ -230,22 +230,41 @@ class ScannerBackgroundAlertService : Service() {
 
     private fun startForegroundServiceMode() {
         isServiceRunning = true
-        val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        try {
+            ensureNotificationChannel(this)
+            val notificationIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("RF Scanner Background Service Active")
-            .setContentText("Monitoring new devices meeting $rssiThresholdDbm dBm threshold...")
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("RF Scanner Background Service Active")
+                .setContentText("Monitoring new devices meeting $rssiThresholdDbm dBm threshold...")
+                .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
 
-        startForeground(NOTIFICATION_ID_FOREGROUND, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                try {
+                    startForeground(
+                        NOTIFICATION_ID_FOREGROUND,
+                        notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } catch (e: Throwable) {
+                    startForeground(NOTIFICATION_ID_FOREGROUND, notification)
+                }
+            } else {
+                startForeground(NOTIFICATION_ID_FOREGROUND, notification)
+            }
+        } catch (e: Throwable) {
+            // Non-fatal fallback for container or restricted background environments
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

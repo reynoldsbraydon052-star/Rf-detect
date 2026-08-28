@@ -62,19 +62,26 @@ fun RealTimeSignalStrengthChartCard(
     var isScrubberActive by remember { mutableStateOf(false) }
     var scrubberXRatio by remember { mutableStateOf(0.85f) }
 
-    // Rolling signal strength history map in memory (deviceId -> List<SignalTimePoint>)
-    val signalHistoryMap = remember { mutableStateMapOf<String, MutableList<SignalTimePoint>>() }
+    // Dedicated decoupled telemetry engine with circular ring buffers
+    val engine = remember { RfFluctuationEngine() }
+    val viewState by engine.viewState.collectAsState()
 
-    LaunchedEffect(activeBlips) {
-        val now = System.currentTimeMillis()
-        activeBlips.forEach { blip ->
-            val list = signalHistoryMap.getOrPut(blip.id) { mutableListOf() }
-            list.add(SignalTimePoint(now, blip.rssi, blip.distance))
-            // Keep last 80 rolling samples (~60-80 seconds)
-            if (list.size > 80) {
-                list.removeAt(0)
-            }
+    DisposableEffect(engine) {
+        onDispose {
+            engine.destroy()
         }
+    }
+
+    LaunchedEffect(selectedFilter) {
+        engine.setFilter(selectedFilter)
+    }
+
+    LaunchedEffect(selectedTargetDeviceId) {
+        engine.setSelectedTarget(selectedTargetDeviceId)
+    }
+
+    LaunchedEffect(activeBlips, selectedTargetDeviceId) {
+        engine.ingestBlips(activeBlips, selectedTargetDeviceId)
     }
 
     val filteredBlips = remember(activeBlips, selectedFilter) {
@@ -86,29 +93,15 @@ fun RealTimeSignalStrengthChartCard(
         activeBlips.firstOrNull { it.id == selectedTargetDeviceId || it.name == selectedTargetDeviceId }
     }
 
-    // Key Telemetry Statistics across active signals
     val primaryBlip = selectedBlip ?: filteredBlips.minByOrNull { it.distance }
-    val primaryHistory = primaryBlip?.let { signalHistoryMap[it.id] } ?: emptyList()
+    val metrics = viewState.primaryMetrics
+    val yMin = viewState.yAxisBounds.minY
+    val yMax = viewState.yAxisBounds.maxY
 
-    val currentRssi = primaryBlip?.rssi ?: -75
-    val peakRssi = if (primaryHistory.isNotEmpty()) primaryHistory.maxOf { it.rssiDbm } else currentRssi
-    val avgRssi = if (primaryHistory.isNotEmpty()) primaryHistory.map { it.rssiDbm }.average() else currentRssi.toDouble()
-
-    // Real-time jitter & variance calculation
-    val jitterDbm = if (primaryHistory.size >= 4) {
-        val recent = primaryHistory.takeLast(10).map { it.rssiDbm }
-        val mean = recent.average()
-        val variance = recent.map { (it - mean) * (it - mean) }.average()
-        sqrt(variance).toFloat()
-    } else 1.2f
-
-    val driftVelocityDbmPerSec = if (primaryHistory.size >= 6) {
-        val recent = primaryHistory.takeLast(6)
-        val timeSec = (recent.last().timestampMs - recent.first().timestampMs).coerceAtLeast(500L) / 1000f
-        ((recent.last().rssiDbm - recent.first().rssiDbm) / timeSec).coerceIn(-15f, 15f)
-    } else 0f
-
-    val stabilityPercent = (100 - (jitterDbm * 8f)).coerceIn(40f, 99.5f)
+    // Compatibility history list for target banner
+    val primaryHistory = remember(viewState.activeSamplesToDraw) {
+        viewState.activeSamplesToDraw.map { SignalTimePoint(it.timestampMs, it.rssiDbm.toInt(), 1.0f) }
+    }
 
     Card(
         modifier = modifier
@@ -202,7 +195,7 @@ fun RealTimeSignalStrengthChartCard(
                 }
             }
 
-            // Live Telemetry Metrics Strip
+            // Live Telemetry Metrics Strip (Calculated Real-Time Values)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,11 +205,11 @@ fun RealTimeSignalStrengthChartCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TelemetryMetricItem("CURRENT", "${currentRssi} dBm", Color(0xFF00FF66))
-                TelemetryMetricItem("PEAK", "${peakRssi} dBm", Color(0xFFFFCC00))
-                TelemetryMetricItem("AVG", "%.0f dBm".format(avgRssi), Color(0xFF00E5FF))
-                TelemetryMetricItem("JITTER", "±%.1f dBm".format(jitterDbm), if (jitterDbm > 3f) Color(0xFFFF3366) else Color(0xFF00FF66))
-                TelemetryMetricItem("STABILITY", "%.0f%%".format(stabilityPercent), Color.White)
+                TelemetryMetricItem("CURRENT", if (metrics.sampleCount > 0) "${metrics.currentRssi.toInt()} dBm" else "-- dBm", Color(0xFF00FF66))
+                TelemetryMetricItem("PEAK", if (metrics.sampleCount > 0) "${metrics.peakRssi.toInt()} dBm" else "-- dBm", Color(0xFFFFCC00))
+                TelemetryMetricItem("AVG", if (metrics.sampleCount > 0) "%.0f dBm".format(metrics.avgRssi) else "-- dBm", Color(0xFF00E5FF))
+                TelemetryMetricItem("JITTER", "±%.1f dBm".format(metrics.jitterDbm), if (metrics.jitterDbm > 3.0) Color(0xFFFF3366) else Color(0xFF00FF66))
+                TelemetryMetricItem("STABILITY", "%.0f%%".format(metrics.stabilityPercent), if (metrics.stabilityPercent < 50.0) Color(0xFFFF3366) else Color.White)
             }
 
             // Filter Chips Bar
@@ -230,13 +223,13 @@ fun RealTimeSignalStrengthChartCard(
                 SelectedTargetPinpointBanner(
                     selectedBlip = selectedBlip,
                     history = primaryHistory,
-                    driftVelocity = driftVelocityDbmPerSec,
+                    driftVelocity = metrics.driftVelocityDbmPerSec.toFloat(),
                     onClearSelection = { onSelectTargetDevice(null) },
                     onOpenArCamera = { onOpenArCameraForTarget?.invoke(selectedBlip.id) }
                 )
             }
 
-            // Canvas Chart Area with Dynamic Animated Glow and Curves
+            // Canvas Chart Area with Dynamic Animated Glow, Curves and Dynamic Y-Axis
             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
             val pulseGlowRadius by infiniteTransition.animateFloat(
                 initialValue = 8f,
@@ -279,18 +272,16 @@ fun RealTimeSignalStrengthChartCard(
                                 val paddingBottom = 26f
                                 val graphW = w - paddingLeft - paddingRight
                                 val graphH = h - paddingTop - paddingBottom
-                                val minRssi = -100f
-                                val maxRssi = -20f
 
                                 var closestBlipId: String? = null
                                 var minDistance = Float.MAX_VALUE
 
                                 filteredBlips.forEach { blip ->
-                                    val history = signalHistoryMap[blip.id] ?: emptyList()
-                                    if (history.isNotEmpty()) {
-                                        val lastPt = history.last()
+                                    val samples = viewState.channelSnapshots[blip.type.uppercase()] ?: emptyList()
+                                    if (samples.isNotEmpty()) {
+                                        val lastPt = samples.last()
                                         val headX = paddingLeft + graphW
-                                        val normY = 1.0f - ((lastPt.rssiDbm.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
+                                        val normY = 1.0f - ((lastPt.rssiDbm.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
                                         val headY = paddingTop + (normY * graphH)
                                         val dist = kotlin.math.hypot((headX - tapOffset.x).toDouble(), (headY - tapOffset.y).toDouble()).toFloat()
                                         if (dist < minDistance) {
@@ -323,20 +314,20 @@ fun RealTimeSignalStrengthChartCard(
 
                     val paddingTop = 26f
                     val paddingBottom = 26f
-                    val paddingLeft = 45f
+                    val paddingLeft = 48f
                     val paddingRight = 15f
 
                     val graphW = w - paddingLeft - paddingRight
                     val graphH = h - paddingTop - paddingBottom
 
-                    // Draw Horizontal Grid Lines (RSSI dBm: -100 to -20)
-                    val minRssi = -100f
-                    val maxRssi = -20f
-                    val rssiStep = 20f
+                    // Draw Horizontal Grid Lines with Dynamic Y-Axis Scaling
+                    val span = yMax - yMin
+                    val stepCount = 4
+                    val step = span / stepCount
 
-                    var currRssi = minRssi
-                    while (currRssi <= maxRssi) {
-                        val normY = 1.0f - ((currRssi - minRssi) / (maxRssi - minRssi))
+                    for (i in 0..stepCount) {
+                        val level = yMin + (i * step)
+                        val normY = 1.0f - ((level - yMin) / span).coerceIn(0f, 1f)
                         val y = paddingTop + (normY * graphH)
 
                         drawLine(
@@ -349,18 +340,16 @@ fun RealTimeSignalStrengthChartCard(
 
                         val textPaint = android.graphics.Paint().apply {
                             color = android.graphics.Color.GRAY
-                            textSize = 20f
+                            textSize = 19f
                             typeface = android.graphics.Typeface.MONOSPACE
                             isAntiAlias = true
                         }
                         drawContext.canvas.nativeCanvas.drawText(
-                            "${currRssi.toInt()}dBm",
-                            8f,
+                            "${level.toInt()}dBm",
+                            6f,
                             y + 6f,
                             textPaint
                         )
-
-                        currRssi += rssiStep
                     }
 
                     // Vertical Time Grid Lines (-60s, -45s, -30s, -15s, NOW)
@@ -393,136 +382,129 @@ fun RealTimeSignalStrengthChartCard(
                     when (chartMode) {
                         "FLUCTUATION" -> {
                             // High-Fidelity Smooth Cubic Spline Wave with Dynamic Gradient Glow Fill
-                            val blipToDraw = selectedBlip ?: filteredBlips.minByOrNull { it.distance }
-                            if (blipToDraw != null) {
-                                val history = signalHistoryMap[blipToDraw.id] ?: emptyList()
-                                if (history.size >= 2) {
-                                    val samples = history.takeLast(40)
-                                    val points = samples.mapIndexed { i, pt ->
-                                        val xRatio = i / (samples.size - 1).toFloat()
-                                        val x = paddingLeft + (xRatio * graphW)
-                                        val normY = 1.0f - ((pt.rssiDbm.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
-                                        val y = paddingTop + (normY * graphH)
-                                        Offset(x, y)
-                                    }
+                            val samples = viewState.activeSamplesToDraw
+                            if (samples.size >= 2) {
+                                val recentSamples = samples.takeLast(60)
+                                val points = recentSamples.mapIndexed { i, pt ->
+                                    val xRatio = i / (recentSamples.size - 1).toFloat()
+                                    val x = paddingLeft + (xRatio * graphW)
+                                    val normY = 1.0f - ((pt.rssiDbm.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
+                                    val y = paddingTop + (normY * graphH)
+                                    Offset(x, y)
+                                }
 
-                                    // Construct Smooth Cubic Bezier Path
-                                    val splinePath = Path()
-                                    splinePath.moveTo(points.first().x, points.first().y)
-                                    for (i in 0 until points.size - 1) {
-                                        val p0 = points[i]
-                                        val p1 = points[i + 1]
-                                        val cx = (p0.x + p1.x) / 2f
-                                        splinePath.cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
-                                    }
+                                // Construct Smooth Cubic Bezier Path
+                                val splinePath = Path()
+                                splinePath.moveTo(points.first().x, points.first().y)
+                                for (i in 0 until points.size - 1) {
+                                    val p0 = points[i]
+                                    val p1 = points[i + 1]
+                                    val cx = (p0.x + p1.x) / 2f
+                                    splinePath.cubicTo(cx, p0.y, cx, p1.y, p1.x, p1.y)
+                                }
 
-                                    // Fill Area Underneath with Neon Gradient Glow
-                                    val fillPath = Path()
-                                    fillPath.addPath(splinePath)
-                                    fillPath.lineTo(points.last().x, h - paddingBottom)
-                                    fillPath.lineTo(points.first().x, h - paddingBottom)
-                                    fillPath.close()
+                                // Fill Area Underneath with Neon Gradient Glow
+                                val fillPath = Path()
+                                fillPath.addPath(splinePath)
+                                fillPath.lineTo(points.last().x, h - paddingBottom)
+                                fillPath.lineTo(points.first().x, h - paddingBottom)
+                                fillPath.close()
 
-                                    val waveColor = when (blipToDraw.type) {
-                                        "WIFI" -> Color(0xFF00FF66)
-                                        "BLE" -> Color(0xFF00E5FF)
-                                        "CELLULAR" -> Color(0xFFFF3366)
-                                        "MAGNETIC" -> Color(0xFFFFCC00)
-                                        else -> Color(0xFF00FF66)
-                                    }
+                                val waveColor = when (primaryBlip?.type) {
+                                    "WIFI" -> Color(0xFF00FF66)
+                                    "BLE" -> Color(0xFF00E5FF)
+                                    "CELLULAR" -> Color(0xFFFF3366)
+                                    "MAGNETIC" -> Color(0xFFFFCC00)
+                                    else -> Color(0xFF00FF66)
+                                }
 
-                                    drawPath(
-                                        path = fillPath,
-                                        brush = Brush.verticalGradient(
-                                            colors = listOf(
-                                                waveColor.copy(alpha = 0.35f),
-                                                waveColor.copy(alpha = 0.08f),
-                                                Color.Transparent
-                                            ),
-                                            startY = paddingTop,
-                                            endY = h - paddingBottom
+                                drawPath(
+                                    path = fillPath,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            waveColor.copy(alpha = 0.35f),
+                                            waveColor.copy(alpha = 0.08f),
+                                            Color.Transparent
                                         ),
-                                        style = Fill
+                                        startY = paddingTop,
+                                        endY = h - paddingBottom
+                                    ),
+                                    style = Fill
+                                )
+
+                                // Outer Neon Halo
+                                drawPath(
+                                    path = splinePath,
+                                    color = waveColor.copy(alpha = 0.3f),
+                                    style = Stroke(width = 8f, cap = StrokeCap.Round)
+                                )
+
+                                // Primary Sharp Trace
+                                drawPath(
+                                    path = splinePath,
+                                    color = waveColor,
+                                    style = Stroke(width = 2.8f, cap = StrokeCap.Round)
+                                )
+
+                                // Peak-Hold Line (Dashed)
+                                val maxPt = recentSamples.maxByOrNull { it.rssiDbm }
+                                if (maxPt != null) {
+                                    val peakNormY = 1.0f - ((maxPt.rssiDbm.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
+                                    val peakY = paddingTop + (peakNormY * graphH)
+                                    drawLine(
+                                        color = Color(0xFFFFCC00).copy(alpha = 0.6f),
+                                        start = Offset(paddingLeft, peakY),
+                                        end = Offset(w - paddingRight, peakY),
+                                        strokeWidth = 1.2f,
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
                                     )
 
-                                    // Outer Neon Halo
-                                    drawPath(
-                                        path = splinePath,
-                                        color = waveColor.copy(alpha = 0.3f),
-                                        style = Stroke(width = 8f, cap = StrokeCap.Round)
-                                    )
-
-                                    // Primary Sharp Trace
-                                    drawPath(
-                                        path = splinePath,
-                                        color = waveColor,
-                                        style = Stroke(width = 2.8f, cap = StrokeCap.Round)
-                                    )
-
-                                    // Peak-Hold Line (Dashed)
-                                    val maxPt = samples.maxByOrNull { it.rssiDbm }
-                                    if (maxPt != null) {
-                                        val peakNormY = 1.0f - ((maxPt.rssiDbm.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
-                                        val peakY = paddingTop + (peakNormY * graphH)
-                                        drawLine(
-                                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
-                                            start = Offset(paddingLeft, peakY),
-                                            end = Offset(w - paddingRight, peakY),
-                                            strokeWidth = 1.2f,
-                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f)
-                                        )
-
-                                        val textPaint = android.graphics.Paint().apply {
-                                            color = android.graphics.Color.YELLOW
-                                            textSize = 18f
-                                            typeface = android.graphics.Typeface.MONOSPACE
-                                            isAntiAlias = true
-                                        }
-                                        drawContext.canvas.nativeCanvas.drawText(
-                                            "PEAK: ${maxPt.rssiDbm}dBm",
-                                            w - paddingRight - 110f,
-                                            peakY - 4f,
-                                            textPaint
-                                        )
+                                    val textPaint = android.graphics.Paint().apply {
+                                        color = android.graphics.Color.YELLOW
+                                        textSize = 18f
+                                        typeface = android.graphics.Typeface.MONOSPACE
+                                        isAntiAlias = true
                                     }
-
-                                    // Current Head Point
-                                    val headPt = points.last()
-                                    drawCircle(color = waveColor, radius = 6f, center = headPt)
-                                    drawCircle(
-                                        color = waveColor.copy(alpha = 0.5f),
-                                        radius = pulseGlowRadius,
-                                        center = headPt,
-                                        style = Stroke(width = 2f)
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        "PEAK: ${maxPt.rssiDbm.toInt()}dBm",
+                                        w - paddingRight - 115f,
+                                        peakY - 4f,
+                                        textPaint
                                     )
                                 }
+
+                                // Current Head Point
+                                val headPt = points.last()
+                                drawCircle(color = waveColor, radius = 6f, center = headPt)
+                                drawCircle(
+                                    color = waveColor.copy(alpha = 0.5f),
+                                    radius = pulseGlowRadius,
+                                    center = headPt,
+                                    style = Stroke(width = 2f)
+                                )
                             }
                         }
 
                         "MULTI_CHANNEL" -> {
-                            // Plot Multi-Channel Simultaneous Overlay Traces
-                            filteredBlips.forEach { blip ->
-                                val history = signalHistoryMap[blip.id] ?: emptyList()
-                                val isSelected = blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId
-                                val lineAlpha = if (isSelected) 1.0f else if (selectedTargetDeviceId != null) 0.25f else 0.85f
-                                val strokeW = if (isSelected) 3.5f else 2.0f
-
-                                val signalColor = when {
-                                    isSelected -> Color(0xFFFFCC00)
-                                    blip.type == "WIFI" -> Color(0xFF00FF66)
-                                    blip.type == "BLE" -> Color(0xFF00E5FF)
-                                    blip.type == "CELLULAR" -> Color(0xFFFF3366)
-                                    blip.type == "MAGNETIC" -> Color(0xFFFFCC00)
+                            // Plot Multi-Channel Simultaneous Overlay Traces for all active protocols
+                            val protocols = listOf("WIFI", "BLE", "CELLULAR", "MAGNETIC")
+                            protocols.forEach { proto ->
+                                val channelSamples = viewState.channelSnapshots[proto] ?: emptyList()
+                                val signalColor = when (proto) {
+                                    "WIFI" -> Color(0xFF00FF66)
+                                    "BLE" -> Color(0xFF00E5FF)
+                                    "CELLULAR" -> Color(0xFFFF3366)
+                                    "MAGNETIC" -> Color(0xFFFFCC00)
                                     else -> Color(0xFFFF9900)
                                 }
 
-                                if (history.size >= 2) {
-                                    val samples = history.takeLast(35)
+                                if (channelSamples.size >= 2) {
+                                    val samples = channelSamples.takeLast(40)
                                     val path = Path()
                                     samples.forEachIndexed { i, pt ->
                                         val xRatio = i / (samples.size - 1).toFloat()
                                         val x = paddingLeft + (xRatio * graphW)
-                                        val normY = 1.0f - ((pt.rssiDbm.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
+                                        val normY = 1.0f - ((pt.rssiDbm.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
                                         val y = paddingTop + (normY * graphH)
 
                                         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -530,18 +512,18 @@ fun RealTimeSignalStrengthChartCard(
 
                                     drawPath(
                                         path = path,
-                                        color = signalColor.copy(alpha = lineAlpha),
-                                        style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                                        color = signalColor.copy(alpha = 0.85f),
+                                        style = Stroke(width = 2.2f, cap = StrokeCap.Round)
                                     )
 
                                     val lastPt = samples.last()
                                     val headX = paddingLeft + graphW
-                                    val normY = 1.0f - ((lastPt.rssiDbm.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
+                                    val normY = 1.0f - ((lastPt.rssiDbm.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
                                     val headY = paddingTop + (normY * graphH)
 
                                     drawCircle(
-                                        color = signalColor.copy(alpha = lineAlpha),
-                                        radius = if (isSelected) 6f else 3.5f,
+                                        color = signalColor,
+                                        radius = 4f,
                                         center = Offset(headX, headY)
                                     )
                                 }
@@ -562,7 +544,6 @@ fun RealTimeSignalStrengthChartCard(
                                     val xLeft = paddingLeft + (b * binW)
                                     val freqRatio = b / numFreqBins.toFloat()
 
-                                    // Heat density computation based on blip distribution + sweeping modulation
                                     val angle = (freqRatio * 6.28 + timeRatio * 4.0 + sweepPhase * 6.28).toDouble()
                                     val syntheticEnergy = (abs(sin(angle)).toFloat() * 0.7f).coerceIn(0f, 1f)
                                     val heatColor = when {
@@ -599,7 +580,7 @@ fun RealTimeSignalStrengthChartCard(
                                     }
                                 }
 
-                                val normY = 1.0f - ((totalPower.toFloat() - minRssi) / (maxRssi - minRssi)).coerceIn(0f, 1f)
+                                val normY = 1.0f - ((totalPower.toFloat() - yMin) / (yMax - yMin)).coerceIn(0f, 1f)
                                 val y = paddingTop + (normY * graphH)
 
                                 if (bin == 0) {
@@ -668,6 +649,12 @@ fun RealTimeSignalStrengthChartCard(
                 }
             }
 
+            // Compact Spectrum Density Breakdown Sub-Graph
+            SpectrumDensityHistogramStrip(
+                densityMap = viewState.spectrumDensity,
+                modifier = Modifier.fillMaxWidth()
+            )
+
             // Bottom Legend & Quick Summary Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -678,9 +665,10 @@ fun RealTimeSignalStrengthChartCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    LegendIndicator("WiFi (2.4/5G)", Color(0xFF00FF66))
+                    LegendIndicator("WiFi", Color(0xFF00FF66))
                     LegendIndicator("BLE", Color(0xFF00E5FF))
                     LegendIndicator("Cellular", Color(0xFFFF3366))
+                    LegendIndicator("Magnetic", Color(0xFFFFCC00))
                     if (selectedTargetDeviceId != null) {
                         LegendIndicator("Locked", Color(0xFFFFCC00))
                     }
@@ -700,8 +688,110 @@ fun RealTimeSignalStrengthChartCard(
     }
 }
 
+/**
+ * Compact Spectrum Density Histogram Strip showing relative channel occupancy and activity levels.
+ */
 @Composable
-private fun TelemetryMetricItem(
+fun SpectrumDensityHistogramStrip(
+    densityMap: Map<String, Float>,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF06150D),
+        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.2f)),
+        modifier = modifier.testTag("spectrum_density_histogram_strip")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "SPECTRUM DENSITY BREAKDOWN",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 8.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = Color(0xFF00FF66)
+                )
+                Text(
+                    text = "RELATIVE OCCUPANCY",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 7.5.sp,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color.Gray
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    Triple("WIFI", Color(0xFF00FF66), densityMap["WIFI"] ?: 0f),
+                    Triple("BLE", Color(0xFF00E5FF), densityMap["BLE"] ?: 0f),
+                    Triple("CELL", Color(0xFFFF3366), densityMap["CELLULAR"] ?: 0f),
+                    Triple("MAG", Color(0xFFFFCC00), densityMap["MAGNETIC"] ?: 0f)
+                ).forEach { (label, color, ratio) ->
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = color
+                            )
+                            Text(
+                                text = "%.0f%%".format(ratio * 100f),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.White
+                            )
+                        }
+
+                        // Activity gauge bar
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFF0E2417))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(ratio.coerceIn(0.04f, 1f))
+                                    .background(color)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TelemetryMetricItem(
     label: String,
     value: String,
     valueColor: Color
@@ -883,3 +973,4 @@ private fun LegendIndicator(label: String, color: Color) {
         )
     }
 }
+

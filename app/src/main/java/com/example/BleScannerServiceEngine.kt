@@ -36,29 +36,53 @@ class BleScannerServiceEngine(
         @SuppressLint("MissingPermission")
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result?.let { res ->
-                val device = res.device ?: return
-                val mac = device.address ?: "00:11:22:33:44:55"
-                val name = device.name ?: res.scanRecord?.deviceName
-                val rssi = res.rssi
-                val txPower = res.txPower
-                val advBytes = res.scanRecord?.bytes
-                val advPayload = advBytes?.let { bytesToHex(it.take(16).toByteArray()) } ?: "0x0201061AFF"
+                try {
+                    val device = res.device ?: return
+                    val mac = try { device.address ?: "00:11:22:33:44:55" } catch (e: Throwable) { "00:11:22:33:44:55" }
+                    val name = try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.BLUETOOTH_CONNECT
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            ) {
+                                device.name
+                            } else null
+                        } else {
+                            device.name
+                        }
+                    } catch (e: Throwable) {
+                        null
+                    } ?: try { res.scanRecord?.deviceName } catch (e: Throwable) { null }
+                    val rssi = res.rssi
+                    val txPower = res.txPower
+                    val advBytes = try { res.scanRecord?.bytes } catch (e: Throwable) { null }
+                    val advPayload = advBytes?.let { bytesToHex(it.take(16).toByteArray()) } ?: "0x0201061AFF"
 
-                serviceScope.launch {
-                    repository.recordBleAdvertisement(
-                        macAddress = mac,
-                        name = name,
-                        rssi = rssi,
-                        txPower = if (txPower != 127) txPower else null,
-                        advertisementPayload = advPayload
-                    )
-                }
+                    serviceScope.launch {
+                        try {
+                            repository.recordBleAdvertisement(
+                                macAddress = mac,
+                                name = name,
+                                rssi = rssi,
+                                txPower = if (txPower != 127) txPower else null,
+                                advertisementPayload = advPayload
+                            )
+                        } catch (_: Throwable) {}
+                    }
+                } catch (_: Throwable) {}
             }
         }
 
         override fun onScanFailed(errorCode: Int) {
             // Scanner fallback when restricted or inactive
         }
+    }
+
+    private var isDeviceStationary = true
+
+    fun updateStationaryState(stationary: Boolean) {
+        isDeviceStationary = stationary
     }
 
     fun startScannerService() {
@@ -140,7 +164,9 @@ class BleScannerServiceEngine(
                     csAccuracyExplicit = if (isCs) 0.15f else null
                 )
 
-                delay(1800)
+                // Adaptive delay: 1200ms when moving (high sensitivity sweeps), throttled to 4500ms when stationary (conserve battery and thermal limits)
+                val scanDelay = if (isDeviceStationary) 4500L else 1200L
+                delay(scanDelay)
             }
         }
     }

@@ -58,8 +58,22 @@ object GattDeepInspector {
         targetName: String = "",
         onDossierReady: (GattInterceptDossier) -> Unit
     ) {
-        val address = device?.address ?: targetAddress.ifEmpty { "00:11:22:33:44:55" }
-        val name = device?.name ?: targetName.ifEmpty { "BLE SIGINT TARGET" }
+        val address = try { device?.address ?: targetAddress.ifEmpty { "00:11:22:33:44:55" } } catch (_: Throwable) { targetAddress.ifEmpty { "00:11:22:33:44:55" } }
+        val name = try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        android.Manifest.permission.BLUETOOTH_CONNECT
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    device?.name
+                } else null
+            } else {
+                device?.name
+            }
+        } catch (_: Throwable) {
+            null
+        } ?: targetName.ifEmpty { "BLE SIGINT TARGET" }
 
         if (device == null) {
             // Provide synthetic fallback dossier for simulated/container environment

@@ -1,0 +1,45 @@
+Starting a Gradle Daemon, 1 busy and 2 stopped Daemons could not be reused, use --status for details
+Reusing configuration cache.
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:processDebugGoogleServices UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:kspDebugKotlin
+> Task :app:compileDebugKotlin
+w: file:///app/applet/app/src/main/java/com/example/Ai3dPinpointDialog.kt:771:81 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/Ai3dPinpointDialog.kt:771:109 'val Icons.Filled.VolumeOff: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeOff.
+w: file:///app/applet/app/src/main/java/com/example/AiDeepAuditModal.kt:344:93 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/AiDeepAuditModal.kt:344:121 'val Icons.Filled.VolumeMute: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeMute.
+w: file:///app/applet/app/src/main/java/com/example/AiDeepAuditModal.kt:413:37 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///app/applet/app/src/main/java/com/example/BleDatabase.kt:23:19 'fun fallbackToDestructiveMigration(): RoomDatabase.Builder<BleDatabase>' is deprecated. Replace by overloaded version with parameter to indicate if all tables should be dropped or not.
+w: file:///app/applet/app/src/main/java/com/example/BleDatabaseTrackerCard.kt:94:53 'val Icons.Filled.BluetoothSearching: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.BluetoothSearching.
+w: file:///app/applet/app/src/main/java/com/example/BleDatabaseTrackerCard.kt:586:53 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/CompassDeviceFinderCard.kt:176:89 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/CompassDeviceFinderCard.kt:176:117 'val Icons.Filled.VolumeOff: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeOff.
+w: file:///app/applet/app/src/main/java/com/example/EnvironmentalCalibrationDialog.kt:122:25 'fun LinearProgressIndicator(progress: Float, modifier: Modifier = ..., color: Color = ..., trackColor: Color = ..., strokeCap: StrokeCap = ...): Unit' is deprecated. Use the overload that takes `progress` as a lambda.
+w: file:///app/applet/app/src/main/java/com/example/EnvironmentalCalibrationDialog.kt:145:25 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///app/applet/app/src/main/java/com/example/FigureEightCalibrationDialog.kt:300:17 'fun Divider(modifier: Modifier = ..., thickness: Dp = ..., color: Color = ...): Unit' is deprecated. Renamed to HorizontalDivider.
+w: file:///app/applet/app/src/main/java/com/example/FullScreenRadarMapOverlay.kt:162:26 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///app/applet/app/src/main/java/com/example/FullScreenRadarMapOverlay.kt:1111:93 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/FullScreenRadarMapOverlay.kt:1111:121 'val Icons.Filled.VolumeOff: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeOff.
+w: file:///app/applet/app/src/main/java/com/example/GattDeepInspector.kt:109:37 'var value: ByteArray!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/GattDeepInspector.kt:112:39 'var value: ByteArray!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/GattDeepInspector.kt:115:36 'var value: ByteArray!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/HardwareSpectrumManager.kt:181:40 'field SSID: String!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/HardwareSpectrumManager.kt:181:63 'field SSID: String!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/MainActivity.kt:1111:53 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+w: file:///app/applet/app/src/main/java/com/example/MainActivity.kt:6008:83 'val Icons.Filled.VolumeOff: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeOff.
+w: file:///app/applet/app/src/main/java/com/example/OuiDatabase.kt:41:18 'fun fallbackToDestructiveMigration(): RoomDatabase.Builder<OuiDatabase>' is deprecated. Replace by overloaded version with parameter to indicate if all tables should be dropped or not.
+w: file:///app/applet/app/src/main/java/com/example/RealTimeSignalChart.kt:142:57 'val Icons.Filled.ShowChart: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.ShowChart.
+w: file:///app/applet/app/src/main/java/com/example/SignalProvider.kt:183:26 'fun startScan(): Boolean' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/SignalProvider.kt:202:39 'field SSID: String!' is deprecated. Deprecated in Java.
+w: file:///app/applet/app/src/main/java/com/example/TacticalScannerScreen.kt:613:73 'val Icons.Filled.VolumeUp: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.VolumeUp.
+
+BUILD SUCCESSFUL in 1m 32s
+9 actionable tasks: 2 executed, 7 up-to-date
+Configuration cache entry reused.

@@ -2,6 +2,13 @@ package com.example
 
 import androidx.compose.ui.graphics.Color
 
+enum class InferenceType {
+    DETERMINISTIC,
+    PROBABILISTIC,
+    HEURISTIC,
+    UNKNOWN
+}
+
 enum class ThreatLevel(val label: String, val color: Color, val priority: Int) {
     SECURE("SECURE / NORMAL", Color(0xFF00FF66), 0),
     LOW_CAUTION("LOW CAUTION", Color(0xFF33CCFF), 1),
@@ -38,6 +45,7 @@ data class DetailedTargetAudit(
     val estimatedDistanceMeters: Float,
     val threatScore: Int,
     val threatCategory: ThreatCategory,
+    val inferenceType: InferenceType = InferenceType.UNKNOWN,
     val manufacturerVendor: String,
     val radioFingerprintSummary: String,
     val trackingHeuristicConfidence: Int, // 0 to 100%

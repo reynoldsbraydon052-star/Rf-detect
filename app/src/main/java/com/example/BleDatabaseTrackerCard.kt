@@ -423,7 +423,7 @@ fun BleDeviceRoomTile(
                         color = if (device.isChannelSoundingCapable) Color(0xFF00FF66).copy(alpha = 0.25f) else proximityColor.copy(alpha = 0.2f)
                     ) {
                         Text(
-                            text = if (device.isChannelSoundingCapable) "%.2f m ±%.2fm".format(device.distanceMeters, device.csEstimatedAccuracyMeters) else "%.1f m".format(device.distanceMeters),
+                            text = if (device.isChannelSoundingCapable) "${device.distanceMeters.toFeetString(2)} ±${device.csEstimatedAccuracyMeters.toFeetString(2)}" else device.distanceMeters.toFeetString(1),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Black,
                                 fontFamily = FontFamily.Monospace
@@ -500,7 +500,7 @@ fun BleDeviceRoomTile(
                                 color = Color(0xFF00FF66)
                             )
                             Text(
-                                text = "±%.2fm CS Accuracy".format(device.csEstimatedAccuracyMeters),
+                                text = "±${device.csEstimatedAccuracyMeters.toFeetString(2)} CS Accuracy",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold,

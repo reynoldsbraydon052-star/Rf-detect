@@ -1,4 +1,5 @@
 package com.example
+import com.example.SonarState
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
@@ -39,6 +40,7 @@ import kotlin.math.sin
  */
 @Composable
 fun CompassDeviceFinderCard(
+    sonarState: SonarState = SonarState.IDLE,
     uiState: SignalRadarUiState,
     onSelectTargetDevice: (String?) -> Unit,
     onToggleAudioSonar: () -> Unit,
@@ -302,7 +304,7 @@ fun CompassDeviceFinderCard(
                                     }
 
                                     Text(
-                                        text = "%.1fm • ${blip.rssi}dBm".format(blip.distance),
+                                        text = "${blip.distance.toFeetString(1)} • ${blip.rssi}dBm",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 9.5.sp
@@ -416,8 +418,8 @@ fun CompassDeviceFinderCard(
                         val elevationDiff = targetBlip.estimatedZOffsetMeters
                         val elevationText = when {
                             abs(elevationDiff) < 1.0f -> "[= SAME LEVEL]"
-                            elevationDiff > 0f -> "[↑ FLOOR ABOVE (+%.1fm)]".format(elevationDiff)
-                            else -> "[↓ FLOOR BELOW (%.1fm)]".format(elevationDiff)
+                            elevationDiff > 0f -> "[↑ FLOOR ABOVE (+${elevationDiff.toFeetString(1)})]"
+                            else -> "[↓ FLOOR BELOW (${elevationDiff.toFeetString(1)})]"
                         }
                         val elevationColor = when {
                             abs(elevationDiff) < 1.0f -> Color(0xFF00FF66)
@@ -447,7 +449,7 @@ fun CompassDeviceFinderCard(
                                     color = Color.Gray
                                 )
                                 Text(
-                                    text = "%.1fm".format(targetBlip.distance),
+                                    text = targetBlip.distance.toFeetString(1),
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace
@@ -655,6 +657,56 @@ fun CompassDeviceFinderCard(
                         )
                     }
                 }
+
+                if (uiState.isAudioSonarActive && sonarState != SonarState.IDLE && sonarState != SonarState.UNAVAILABLE) {
+                    val sonarLabel = when(sonarState) {
+                        SonarState.FAR -> "FAR"
+                        SonarState.APPROACHING -> "APPROACHING"
+                        SonarState.CLOSE -> "CLOSE"
+                        SonarState.TARGET_REACHED -> "TARGET REACHED"
+                        else -> ""
+                    }
+                    val sonarDots = when(sonarState) {
+                        SonarState.FAR -> "● ○ ○ ○"
+                        SonarState.APPROACHING -> "● ● ○ ○"
+                        SonarState.CLOSE -> "● ● ● ○"
+                        SonarState.TARGET_REACHED -> "● ● ● ●"
+                        else -> ""
+                    }
+                    val sonarColor = if (sonarState == SonarState.TARGET_REACHED) Color(0xFF00FF66) else Color(0xFFFFCC00)
+                    
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = sonarColor.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, sonarColor.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    "SONAR ACTIVE",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp),
+                                    color = sonarColor.copy(alpha = 0.8f)
+                                )
+                                Text(
+                                    sonarLabel,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+                                    color = sonarColor
+                                )
+                            }
+                            Text(
+                                sonarDots,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = sonarColor
+                            )
+                        }
+                    }
+                }
+
             }
         }
     }

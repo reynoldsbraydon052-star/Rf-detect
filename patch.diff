@@ -1,0 +1,149 @@
+diff --git a/.build-outputs/app-debug.apk b/.build-outputs/app-debug.apk
+index 6e03074..c459505 100644
+Binary files a/.build-outputs/app-debug.apk and b/.build-outputs/app-debug.apk differ
+diff --git a/app/src/main/java/com/example/TacticalScannerScreen.kt b/app/src/main/java/com/example/TacticalScannerScreen.kt
+index e591343..77fcf88 100644
+--- a/app/src/main/java/com/example/TacticalScannerScreen.kt
++++ b/app/src/main/java/com/example/TacticalScannerScreen.kt
+@@ -177,7 +177,7 @@ fun TacticalScannerScreen(
+             Surface(
+                 modifier = Modifier
+                     .fillMaxWidth()
+-                    .statusBarsPadding()
++                    .windowInsetsPadding(WindowInsets.statusBars)
+                     .testTag("tactical_scanner_header_card"),
+                 color = Color(0xFF0A140E),
+                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f)),
+@@ -747,13 +747,13 @@ fun TacticalScannerScreen(
+                                 if (searchQuery.isNotEmpty()) {
+                                     IconButton(
+                                         onClick = { searchQuery = "" },
+-                                        modifier = Modifier.size(16.dp)
++                                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                     ) {
+                                         Icon(
+                                             imageVector = Icons.Default.Close,
+                                             contentDescription = "Clear Search",
+                                             tint = Color.Gray,
+-                                            modifier = Modifier.size(12.dp)
++                                            modifier = Modifier.size(14.dp)
+                                         )
+                                     }
+                                 }
+@@ -764,7 +764,7 @@ fun TacticalScannerScreen(
+                         Button(
+                             onClick = { isDeviceListExpanded = !isDeviceListExpanded },
+                             modifier = Modifier
+-                                .height(40.dp)
++                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                 .testTag("toggle_device_list_button"),
+                             shape = RoundedCornerShape(8.dp),
+                             colors = ButtonDefaults.buttonColors(
+@@ -800,6 +800,7 @@ fun TacticalScannerScreen(
+                             val isSelected = uiState.selectedFilterType == type
+                             Surface(
+                                 modifier = Modifier
++                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                     .clickable { onFilterSelected(type) }
+                                     .testTag("filter_chip_$type"),
+                                 shape = RoundedCornerShape(16.dp),
+@@ -809,16 +810,20 @@ fun TacticalScannerScreen(
+                                     color = if (isSelected) Color(0xFF00FF66) else Color(0xFF00FF66).copy(alpha = 0.2f)
+                                 )
+                             ) {
+-                                Text(
+-                                    text = type,
+-                                    style = MaterialTheme.typography.labelSmall.copy(
+-                                        fontFamily = FontFamily.Monospace,
+-                                        fontSize = 9.sp,
+-                                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal
+-                                    ),
+-                                    color = if (isSelected) Color(0xFF00FF66) else Color.Gray,
++                                Box(
++                                    contentAlignment = Alignment.Center,
+                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+-                                )
++                                ) {
++                                    Text(
++                                        text = type,
++                                        style = MaterialTheme.typography.labelSmall.copy(
++                                            fontFamily = FontFamily.Monospace,
++                                            fontSize = 9.sp,
++                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal
++                                        ),
++                                        color = if (isSelected) Color(0xFF00FF66) else Color.Gray
++                                    )
++                                }
+                             }
+                         }
+ 
+@@ -828,14 +833,14 @@ fun TacticalScannerScreen(
+                         IconButton(
+                             onClick = { showMaskedAddresses = !showMaskedAddresses },
+                             modifier = Modifier
+-                                .size(24.dp)
++                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                 .testTag("scanner_toggle_mask_button")
+                         ) {
+                             Icon(
+                                 imageVector = if (showMaskedAddresses) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                 contentDescription = "Toggle MAC masking",
+                                 tint = Color(0xFF00FF66).copy(alpha = 0.8f),
+-                                modifier = Modifier.size(14.dp)
++                                modifier = Modifier.size(16.dp)
+                             )
+                         }
+                     }
+@@ -1008,9 +1013,9 @@ fun TacticalScannerScreen(
+                                                         Button(
+                                                             onClick = { onSelectTargetDevice(if (isSelected) null else blip.id) },
+                                                             modifier = Modifier
+-                                                                .height(24.dp)
++                                                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                                                 .testTag("lock_action_${blip.id}"),
+-                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
++                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                                             shape = RoundedCornerShape(4.dp),
+                                                             colors = ButtonDefaults.buttonColors(
+                                                                 containerColor = if (isSelected) Color(0xFFFFD700).copy(alpha = 0.2f) else Color(0xFF00FF66).copy(alpha = 0.1f),
+@@ -1081,7 +1086,7 @@ fun TacticalScannerScreen(
+                         onClick = { isControlsExpanded = !isControlsExpanded },
+                         modifier = Modifier
+                             .fillMaxWidth()
+-                            .height(40.dp)
++                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                             .testTag("toggle_advanced_controls_button"),
+                         shape = RoundedCornerShape(8.dp),
+                         colors = ButtonDefaults.buttonColors(
+@@ -1164,13 +1169,13 @@ fun TacticalScannerScreen(
+                                     )
+                                     IconButton(
+                                         onClick = { onPlayTestPing(1200.0) },
+-                                        modifier = Modifier.size(28.dp)
++                                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                     ) {
+                                         Icon(
+                                             imageVector = Icons.Default.VolumeUp,
+                                             contentDescription = "Test sound",
+                                             tint = Color(0xFF00FF66),
+-                                            modifier = Modifier.size(16.dp)
++                                            modifier = Modifier.size(18.dp)
+                                         )
+                                     }
+                                 }
+@@ -1313,6 +1318,7 @@ fun TacticalScannerScreen(
+                             containerColor = Color(0xFFFF3366),
+                             contentColor = Color.White
+                         ),
++                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                         shape = RoundedCornerShape(6.dp)
+                     ) {
+                         Text(
+@@ -1366,6 +1372,7 @@ fun TacticalScannerScreen(
+                         color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.15f) else Color.Transparent,
+                         modifier = Modifier
+                             .weight(1f)
++                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                             .testTag("scanner_bottom_tab_${tab.name.lowercase()}")
+                     ) {
+                         Column(

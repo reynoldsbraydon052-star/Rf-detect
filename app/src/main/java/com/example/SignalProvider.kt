@@ -45,7 +45,8 @@ data class WifiSpectrumMetric(
     val distanceRttMeters: Float?,
     val is80211mcSupported: Boolean,
     val signalLevelPercent: Int = 0,
-    val capabilities: String = ""
+    val capabilities: String = "",
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class BleSpectrumMetric(
@@ -56,7 +57,8 @@ data class BleSpectrumMetric(
     val serviceUuids: List<String>,
     val vendor: String,
     val isRpaRandomized: Boolean,
-    val isHighRiskSurveillance: Boolean
+    val isHighRiskSurveillance: Boolean,
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class CellularMetric(
@@ -65,7 +67,8 @@ data class CellularMetric(
     val rsrpDbm: Int,
     val rsrqDb: Int,
     val arfcn: Int,
-    val carrierFreqMhz: Float
+    val carrierFreqMhz: Float,
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class GnssSatelliteMetric(
@@ -75,7 +78,8 @@ data class GnssSatelliteMetric(
     val bandLabel: String, // L1, L5, E1, E5a
     val cn0DbHz: Float,
     val azimuthDegrees: Float,
-    val elevationDegrees: Float
+    val elevationDegrees: Float,
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class EmfUncalibratedMetric(
@@ -86,7 +90,8 @@ data class EmfUncalibratedMetric(
     val softIronBiasX: Float,
     val softIronBiasY: Float,
     val softIronBiasZ: Float,
-    val isAnomalyDetected: Boolean
+    val isAnomalyDetected: Boolean,
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class AcousticFftMetric(
@@ -94,7 +99,8 @@ data class AcousticFftMetric(
     val peakMagnitudeDb: Float,
     val isUltrasonicDetected: Boolean, // 18kHz - 22kHz
     val isCoilWhineDetected: Boolean,
-    val fftMagnitudes: FloatArray = FloatArray(64)
+    val fftMagnitudes: FloatArray = FloatArray(64),
+    val provenance: DataProvenance = DataProvenance.UNKNOWN
 )
 
 data class MultiSpectrumSnapshot(
@@ -382,7 +388,8 @@ class SignalProvider(private val context: Context) : SensorEventListener {
                             peakMagnitudeDb = baseDb,
                             isUltrasonicDetected = false,
                             isCoilWhineDetected = false,
-                            fftMagnitudes = dummyMagnitudes.clone()
+                            fftMagnitudes = dummyMagnitudes.clone(),
+                            provenance = DataProvenance.SIMULATED
                         )
                     )
                 }

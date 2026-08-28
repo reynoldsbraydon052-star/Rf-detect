@@ -53,6 +53,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -85,10 +95,16 @@ fun SettingsScreen(
     onPurgeHistory: () -> Unit,
     onOpenCalibration: () -> Unit = {},
     onSnapshotTrustedBaseline: () -> Unit = {},
-    onSetMaxDevices: (Int) -> Unit = {}
+    onSetMaxDevices: (Int) -> Unit = {},
+    onTestGeminiConnection: () -> Unit = {},
+    onTestNetworkSpeed: () -> Unit = {},
+    onSetAiMode: (AiInferenceMode) -> Unit = {},
+    onSaveGeminiKey: (String) -> Unit = {},
+    onClearGeminiKey: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    var isLocalModelManagerOpen by remember { mutableStateOf(false) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/csv")
@@ -623,7 +639,420 @@ fun SettingsScreen(
                 }
             }
 
-            // Section 4: Data & Storage
+            // Section 4: AI Gateway & Multi-Model Inference Co-Pilot
+            SettingsSectionHeader(
+                icon = Icons.Default.Security,
+                title = "AI GATEWAY & CO-PILOT CONFIG",
+                subtitle = "Manage local LLM models (llama.cpp) & Gemini cloud integrations securely"
+            )
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1F13)),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.testTag("ai_gateway_diagnostics_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Inference Mode Selector
+                    Text(
+                        text = "AI INFERENCE MODE",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AiInferenceMode.values().forEach { mode ->
+                            val selected = uiState.aiInferenceMode == mode
+                            val label = when (mode) {
+                                AiInferenceMode.GEMINI_CLOUD -> "Gemini Cloud"
+                                AiInferenceMode.LOCAL_GGUF -> "Local GGUF"
+                                AiInferenceMode.AUTO_HYBRID -> "Auto Hybrid"
+                            }
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSetAiMode(mode) },
+                                label = {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF00FF66),
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color.Black.copy(alpha = 0.4f),
+                                    labelColor = Color.LightGray
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = selected,
+                                    selectedBorderColor = Color(0xFF00FF66),
+                                    borderColor = Color(0xFF00FF66).copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.testTag("ai_mode_chip_${mode.name}")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // API Key Settings (Password-masked with toggle visibility, Save/Clear buttons)
+                    Text(
+                        text = "GEMINI CLOUD API KEY",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+
+                    var apiKeyText by remember { mutableStateOf("") }
+                    var isApiKeyVisible by remember { mutableStateOf(false) }
+
+                    OutlinedTextField(
+                        value = apiKeyText,
+                        onValueChange = { apiKeyText = it },
+                        modifier = Modifier.fillMaxWidth().testTag("gemini_key_text_field"),
+                        label = {
+                            Text(
+                                "Enter API Key...",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.White
+                        ),
+                        visualTransformation = if (isApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            val icon = if (isApiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
+                            val description = if (isApiKeyVisible) "Hide password" else "Show password"
+                            IconButton(onClick = { isApiKeyVisible = !isApiKeyVisible }) {
+                                Icon(imageVector = icon, contentDescription = description, tint = Color(0xFF00FF66))
+                            }
+                        },
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF00FF66),
+                            unfocusedBorderColor = Color(0xFF00FF66).copy(alpha = 0.5f),
+                            cursorColor = Color(0xFF00FF66)
+                        ),
+                        singleLine = true
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (apiKeyText.isNotBlank()) {
+                                    onSaveGeminiKey(apiKeyText)
+                                    apiKeyText = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF66)),
+                            modifier = Modifier.weight(1f).testTag("save_api_key_btn"),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("SAVE KEY", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                onClearGeminiKey()
+                                apiKeyText = ""
+                            },
+                            border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                            modifier = Modifier.weight(1f).testTag("clear_api_key_btn"),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("CLEAR KEY", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = Color.Red)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Status indicators (Gemini & Local GGUF status)
+                    Text(
+                        text = "ENGINE PLATFORM STATUS",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.1f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            // Gemini Configured Status
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(
+                                            if (uiState.geminiApiKeyExists) Color(0xFF00FF66) else Color.Gray,
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                )
+                                Text(
+                                    text = if (uiState.geminiApiKeyExists) "Gemini Cloud: Configured" else "Gemini Cloud: Not Configured",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = if (uiState.geminiApiKeyExists) Color(0xFF00FF66) else Color.Gray
+                                )
+                            }
+
+                            // Local GGUF Status
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val isLocalLoaded = uiState.localModelStatus.contains("Loaded")
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(
+                                            if (isLocalLoaded) Color(0xFF00FF66) else Color(0xFFFFCC00),
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                )
+                                Text(
+                                    text = uiState.localModelStatus,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = if (isLocalLoaded) Color(0xFF00FF66) else Color(0xFFFFCC00)
+                                )
+                            }
+                        }
+                    }
+
+                    // Diagnostics section
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DIAGNOSTIC API TELEMETRY",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color.White
+                        )
+
+                        val (stateLabel, stateColor) = when (val cs = uiState.geminiConnectionState) {
+                            is GeminiConnectionState.NotConfigured -> "NOT CONFIGURED" to Color.Gray
+                            is GeminiConnectionState.Testing -> "TESTING..." to Color(0xFFFFCC00)
+                            is GeminiConnectionState.Connected -> "CONNECTED" to Color(0xFF00FF66)
+                            is GeminiConnectionState.AuthenticationError -> "AUTH ERROR" to Color(0xFFFF4444)
+                            is GeminiConnectionState.HttpError -> "HTTP ERROR" to Color(0xFFFF4444)
+                            is GeminiConnectionState.NetworkError -> "NETWORK ERROR" to Color(0xFFFFCC00)
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = stateColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, stateColor.copy(alpha = 0.6f))
+                        ) {
+                            Text(
+                                text = stateLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp
+                                ),
+                                color = stateColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    val connectionDetail = when (val cs = uiState.geminiConnectionState) {
+                        is GeminiConnectionState.NotConfigured -> "No API Key has been loaded. Set GEMINI_API_KEY to enable real-time tactical summaries and audits."
+                        is GeminiConnectionState.Testing -> "Pinging Gemini API server to verify host reachability and credentials..."
+                        is GeminiConnectionState.Connected -> "Successfully connected using model '${cs.model}'. Real-time threat auditing and tactical co-pilot are fully operational."
+                        is GeminiConnectionState.AuthenticationError -> "Authorization failed (Code ${cs.code}): ${cs.message}. Check your API Key."
+                        is GeminiConnectionState.HttpError -> "HTTP exception occurred (Code ${cs.code}): ${cs.message}."
+                        is GeminiConnectionState.NetworkError -> "Network/Socket Exception: ${cs.message}. Check your connectivity."
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.1f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = connectionDetail,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            ),
+                            color = Color.LightGray,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+
+                    val isTesting = uiState.geminiConnectionState is GeminiConnectionState.Testing
+                    Button(
+                        onClick = onTestGeminiConnection,
+                        enabled = !isTesting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_test_gemini_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isTesting) Color(0xFF1B3B26) else Color(0xFF00FF66),
+                            disabledContainerColor = Color(0xFF12261A)
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isTesting) "DIAGNOSING CONNECTION..." else "TEST GEMINI API REACHABILITY",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (isTesting) Color(0xFF00FF66).copy(alpha = 0.5f) else Color.Black
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "DIAGNOSTIC NETWORK SPEED & CONNECTIVITY TEST",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+
+                    val isNetworkTesting = uiState.networkSpeedTestResult == "TESTING..."
+                    val speedTestStatusColor = when {
+                        uiState.networkSpeedTestResult == null -> Color.Gray
+                        uiState.networkSpeedTestResult.startsWith("SUCCESS") -> Color(0xFF00FF66)
+                        uiState.networkSpeedTestResult.startsWith("FAIL") -> Color(0xFFFF4444)
+                        else -> Color(0xFFFFCC00)
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, speedTestStatusColor.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = uiState.networkSpeedTestResult ?: "Select 'Run Network Speed Test' below to measure connectivity latency via Standard Google generate_204 HTTP endpoint.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            ),
+                            color = if (uiState.networkSpeedTestResult == null) Color.LightGray else speedTestStatusColor,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+
+                    Button(
+                        onClick = onTestNetworkSpeed,
+                        enabled = !isNetworkTesting,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_test_network_speed_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isNetworkTesting) Color(0xFF1B3B26) else Color(0xFF00FF66),
+                            disabledContainerColor = Color(0xFF12261A)
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isNetworkTesting) "MEASURING BANDWIDTH/LATENCY..." else "RUN NETWORK SPEED TEST",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = if (isNetworkTesting) Color(0xFF00FF66).copy(alpha = 0.5f) else Color.Black
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Button(
+                        onClick = { isLocalModelManagerOpen = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("settings_open_local_ai_model_manager_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Black,
+                            contentColor = Color(0xFF00FF66)
+                        ),
+                        border = BorderStroke(1.dp, Color(0xFF00FF66)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            tint = Color(0xFF00FF66)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "LOCAL MODEL MANAGER",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (isLocalModelManagerOpen) {
+                androidx.compose.ui.window.Dialog(
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                    onDismissRequest = { isLocalModelManagerOpen = false }
+                ) {
+                    LocalAiModelScreen(onClose = { isLocalModelManagerOpen = false })
+                }
+            }
+
+            // Section 5: Data & Storage
             SettingsSectionHeader(
                 icon = Icons.Default.Download,
                 title = "DATA EXPORT & STORAGE",

@@ -1,4 +1,5 @@
 package com.example
+import com.example.SonarState
 
 import android.Manifest
 import android.net.Uri
@@ -11,6 +12,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -50,6 +64,27 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.LocationSearching
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -87,6 +122,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Memory
@@ -139,18 +177,40 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.ContextCompat
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.accompanist.permissions.shouldShowRationale
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialize the secure credential store on startup
+        val credentialStore = AiCredentialStore.getInstance(this)
+        lifecycleScope.launch {
+            if (!credentialStore.hasGeminiApiKey()) {
+                // Safely load build config key via reflection if present as a baseline
+                try {
+                    val buildConfigClass = Class.forName("com.example.BuildConfig")
+                    val apiKeyField = buildConfigClass.getField("GEMINI_API_KEY")
+                    val defaultKey = apiKeyField.get(null) as? String
+                    if (!defaultKey.isNullOrBlank() && defaultKey != "MY_GEMINI_API_KEY" && !defaultKey.contains("ENTER_YOUR_KEY")) {
+                        credentialStore.setGeminiApiKey(defaultKey)
+                    }
+                } catch (e: Exception) {
+                    // No default build config key or class not found
+                }
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             TacticalRadarTheme {
@@ -209,6 +269,7 @@ fun TacticalRadarTheme(content: @Composable () -> Unit) {
 fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showNoiseCalibration by remember { mutableStateOf(false) }
 
     val permissionsList = remember {
         buildList {
@@ -300,32 +361,42 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
             )
         }
 
+        val isImmersive = uiState.selectedTab == RadarTab.SWEEP_RADAR || uiState.selectedTab == RadarTab.FULL_RADAR
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .padding(padding)
+                .let { if (isImmersive) it else it.padding(padding) }
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                        bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                    )
+                    .let {
+                        if (isImmersive) {
+                            it
+                        } else {
+                            it.padding(
+                                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            )
+                        }
+                    }
             ) {
                 // Top Tactical Header Badge
-                TacticalHeader(
-                    uiState = uiState,
-                    onOpenSettings = { viewModel.setTab(RadarTab.SETTINGS) },
-                    onOpenDocOverlay = { showHardwareDocOverlay = true },
-                    onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) },
-                    onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) },
-                    onOpenAiIntel = { viewModel.setTab(RadarTab.AI_THREAT_ANALYSIS) }
-                )
+                if (!isImmersive) {
+                    TacticalHeader(
+                        uiState = uiState,
+                        onOpenSettings = { viewModel.setTab(RadarTab.SETTINGS) },
+                        onOpenDocOverlay = { showHardwareDocOverlay = true },
+                        onOpenFullRadar = { viewModel.setTab(RadarTab.FULL_RADAR) },
+                        onOpenScanner = { viewModel.setTab(RadarTab.SCANNER) },
+                        onOpenAiIntel = { viewModel.setTab(RadarTab.AI_THREAT_ANALYSIS) }
+                    )
+                }
 
                 // High-Priority EW Alert Banners
-                AnimatedVisibility(visible = uiState.isRfJammingDetected || uiState.isGnssSpoofingDetected) {
+                AnimatedVisibility(visible = (uiState.isRfJammingDetected || uiState.isGnssSpoofingDetected) && !isImmersive) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -349,7 +420,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     }
                 }
 
-                AnimatedVisibility(visible = uiState.imsiCatcherAlert.isAlertTriggered) {
+                AnimatedVisibility(visible = uiState.imsiCatcherAlert.isAlertTriggered && !isImmersive) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -378,7 +449,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     .filter { it.permission == Manifest.permission.ACCESS_FINE_LOCATION || it.permission == Manifest.permission.ACCESS_COARSE_LOCATION }
                     .any { it.status.isGranted }
 
-                AnimatedVisibility(visible = !hasLocationAccess) {
+                AnimatedVisibility(visible = !hasLocationAccess && !isImmersive) {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -440,7 +511,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                 }
 
                 // Auto-Calibration Stability UI Notification Banner
-                AnimatedVisibility(visible = uiState.calibrationNotificationMessage != null) {
+                AnimatedVisibility(visible = uiState.calibrationNotificationMessage != null && !isImmersive) {
                     uiState.calibrationNotificationMessage?.let { msg ->
                         Card(
                             modifier = Modifier
@@ -508,128 +579,11 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     }
                 }
 
-                // Device Signal Threshold Match Live Alert Banner
-                uiState.activeDeviceAlerts.firstOrNull()?.let { alert ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .testTag("device_threshold_alert_banner"),
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF230B12),
-                        border = BorderStroke(1.dp, Color(0xFFFF2A55).copy(alpha = 0.8f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color(0xFFFF2A55).copy(alpha = 0.2f),
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Shield,
-                                            contentDescription = "Device Alert",
-                                            tint = Color(0xFFFF2A55),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                                Column {
-                                    Text(
-                                        text = "NEW TARGET MATCHED SIGNAL THRESHOLD (${alert.rssi} dBm)",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Black,
-                                            fontFamily = FontFamily.Monospace,
-                                            letterSpacing = 0.5.sp
-                                        ),
-                                        color = Color(0xFFFF2A55)
-                                    )
-                                    Text(
-                                        text = "${alert.deviceName} • [${alert.macAddress}]",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = "Est. Range: %.1fm • Cutoff: ${uiState.rssiAlertThresholdDbm} dBm".format(alert.distanceMeters),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        color = Color.LightGray
-                                    )
-                                }
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Button(
-                                    onClick = { viewModel.turnOffMatchedSignalAlerts() },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFFF2A55).copy(alpha = 0.2f),
-                                        contentColor = Color(0xFFFF2A55)
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.testTag("turn_off_matched_alerts_button")
-                                ) {
-                                    Text(
-                                        text = "TURN OFF",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 9.sp
-                                        )
-                                    )
-                                }
-
-                                if (uiState.activeDeviceAlerts.size > 1) {
-                                    Button(
-                                        onClick = { viewModel.dismissAllDeviceAlerts() },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = Color.White.copy(alpha = 0.15f),
-                                            contentColor = Color.White
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.testTag("clear_all_matched_alerts_button")
-                                    ) {
-                                        Text(
-                                            text = "CLEAR ALL (${uiState.activeDeviceAlerts.size})",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 9.sp
-                                            )
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    onClick = { viewModel.dismissDeviceAlert(alert.id) },
-                                    modifier = Modifier.size(28.dp).testTag("dismiss_device_alert_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Dismiss Alert",
-                                        tint = Color.LightGray,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
+                val sonarState by viewModel.sonarState.collectAsStateWithLifecycle()
                 Box(modifier = Modifier.weight(1f)) {
                     when (uiState.selectedTab) {
                         RadarTab.SWEEP_RADAR -> SweepRadarScreen(
+                            sonarState = sonarState,
                             uiState = uiState,
                             onToggleAudioSonar = { viewModel.toggleAudioSonar() },
                             onTogglePerimeterAlarm = { viewModel.togglePerimeterAlarm() },
@@ -657,7 +611,12 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
                             onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() },
                             onCycleRadarGridMode = { viewModel.cycleRadarGridMode() },
-                            onOpenRadarGridConfig = { viewModel.openRadarGridConfigDialog() }
+                            onOpenRadarGridConfig = { viewModel.openRadarGridConfigDialog() },
+                            targetRssiThresholds = viewModel.targetRssiThresholds,
+                            targetDistanceThresholds = viewModel.targetDistanceThresholds,
+                            onSetTargetRssiThreshold = { id, rssi -> viewModel.setTargetRssiThreshold(id, rssi) },
+                            onSetTargetDistanceThreshold = { id, dist -> viewModel.setTargetDistanceThreshold(id, dist) },
+                            onViewModeChanged = { viewModel.setViewMode(it) }
                         )
 
                         RadarTab.FULL_RADAR -> FullScreenRadarScreen(
@@ -675,20 +634,64 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
                         )
 
+                        RadarTab.SIMULATION_LAB -> {
+                            val activeSession by viewModel.replayEngine.activeSession.collectAsStateWithLifecycle()
+                            val savedSessions by viewModel.rfSessionEngine.allSessions.collectAsStateWithLifecycle(initialValue = emptyList())
+                            val replayState by viewModel.replayEngine.replayState.collectAsStateWithLifecycle()
+                            val currentPositionMs by viewModel.replayEngine.currentPositionMs.collectAsStateWithLifecycle()
+                            val playbackSpeed by viewModel.replayEngine.playbackSpeed.collectAsStateWithLifecycle()
+                            val simulationScenario by viewModel.simulationEngine.activeScenario.collectAsStateWithLifecycle()
+
+                            SimulationLabScreen(
+                                uiState = uiState,
+                                replayState = replayState,
+                                simulationScenario = simulationScenario,
+                                activeSession = activeSession,
+                                savedSessions = savedSessions,
+                                currentPositionMs = currentPositionMs,
+                                playbackSpeed = playbackSpeed,
+                                onStartSimulation = { 
+                                    viewModel.setOperatingMode(OperatingMode.SIMULATION)
+                                    viewModel.simulationEngine.startSimulation(it) 
+                                },
+                                onStopSimulation = { 
+                                    viewModel.simulationEngine.stopSimulation()
+                                    viewModel.setOperatingMode(OperatingMode.LIVE)
+                                },
+                                onLoadReplay = { 
+                                    viewModel.setOperatingMode(OperatingMode.REPLAY)
+                                    viewModel.replayEngine.loadSession(it) 
+                                },
+                                onPlayReplay = { viewModel.replayEngine.play() },
+                                onPauseReplay = { viewModel.replayEngine.pause() },
+                                onStopReplay = { viewModel.replayEngine.stopReplay() },
+                                onSeekReplay = { viewModel.replayEngine.seekTo(it) },
+                                onSetPlaybackSpeed = { viewModel.replayEngine.setSpeed(it) },
+                                onReturnToLive = {
+                                    viewModel.simulationEngine.stopSimulation()
+                                    viewModel.replayEngine.stopReplay()
+                                    viewModel.setOperatingMode(OperatingMode.LIVE)
+                                }
+                            )
+                        }
+
                         RadarTab.AI_THREAT_ANALYSIS -> AiThreatIntelScreen(
                             uiState = uiState,
                             threatReport = uiState.threatAnalysisReport,
+                            investigatorAssessment = uiState.investigatorAssessment,
+                            onSaveInterpretation = { viewModel.saveAiInterpretation() },
                             isAnalyzing = uiState.isAiAnalyzingThreats,
                             copilotMessages = uiState.copilotMessages,
                             isCopilotThinking = uiState.isCopilotThinking,
                             selectedDeepAuditTarget = uiState.selectedDeepAuditTarget,
                             isDeepAuditingEmitterId = uiState.isDeepAuditingEmitterId,
-                            onRunAiThreatScan = { viewModel.runAiThreatAnalysis() },
+                            onRunAiThreatScan = { viewModel.runAiInvestigator() },
                             onSendCopilotQuery = { viewModel.sendCopilotQuery(it) },
                             onSelectTargetOnRadar = { viewModel.selectTargetDevice(it) },
                             onOpenRadarTab = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
                             onTriggerDeepAudit = { emitter -> viewModel.triggerTargetDeepAudit(emitter) },
-                            onCloseDeepAudit = { viewModel.closeDeepAuditModal() }
+                            onCloseDeepAudit = { viewModel.closeDeepAuditModal() },
+                            onTestGeminiConnection = { viewModel.testGeminiConnection() }
                         )
 
                         RadarTab.SCANNER -> TacticalScannerScreen(
@@ -703,10 +706,13 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                                 viewModel.toggleFullScreenMap(true)
                             },
                             onPlayTestPing = { viewModel.playTestAudioPing(it) },
-                            onClearScanHistory = { viewModel.clearBleDatabaseLogs() }
+                            onClearScanHistory = { viewModel.clearBleDatabaseLogs() },
+                            onAddSpatialPoint = { id, pt -> viewModel.addSpatialPoint(id, pt) },
+                            onSetMapRange = { viewModel.setMapRangeMeters(it) }
                         )
 
                         RadarTab.SPECTRUM_ANALYZER -> SpectrumAnalyzerScreen(
+                            sonarState = sonarState,
                             uiState = uiState,
                             onFilterSelected = { viewModel.setFilterType(it) },
                             onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
@@ -727,6 +733,22 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
 
                         RadarTab.HISTORIC_HEATMAP -> HistoricHeatmapScreen(
                             uiState = uiState
+                        )
+                        RadarTab.ENVIRONMENT_MAP -> RfEnvironmentMapScreen(
+                            uiState = uiState,
+                            mappingEngine = viewModel.environmentMappingEngine
+                        )
+                        RadarTab.IDENTITY_GRAPH -> DeviceIdentityScreen(
+                            uiState = uiState,
+                            identityEngine = viewModel.deviceIdentityEngine
+                        )
+                        RadarTab.INTELLIGENCE_DASHBOARD -> IntelligenceDashboardScreen(
+                            viewModel = viewModel,
+                            uiState = uiState,
+                            sessionEngine = viewModel.rfSessionEngine,
+                            anomalyEngine = viewModel.rfAnomalyEngine,
+                            patternEngine = viewModel.rfPatternEngine,
+                            intelligenceEngine = viewModel.rfIntelligenceEngine
                         )
 
                         RadarTab.MAGNETOMETER_EMF -> MagnetometerScreen(
@@ -750,6 +772,21 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onExportCsvUri = { uri -> viewModel.writeLogsToUri(context, uri) }
                         )
 
+                        RadarTab.EVENT_RECORDER -> RfEventRecorderScreen(
+                            uiState = uiState,
+                            recorderEngine = viewModel.rfEventRecorderEngine,
+                            onExportJson = { uri -> viewModel.exportRfEventsJson(context, uri) },
+                            onExportCsv = { uri -> viewModel.exportRfEventsCsv(context, uri) },
+                            onExportCaptures = { 
+                                android.widget.Toast.makeText(context, "No PCAP or raw SDR capture files available for this session.", android.widget.Toast.LENGTH_LONG).show() 
+                            }
+                        )
+                        RadarTab.ADAPTIVE_LOCALIZATION -> AdaptiveRfLocalizationScreen(
+                            uiState = uiState,
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onBackToRadar = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
+                            viewModel = viewModel
+                        )
                         RadarTab.SETTINGS -> SettingsScreen(
                             uiState = uiState,
                             onBack = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
@@ -769,7 +806,12 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onPurgeHistory = { viewModel.purgeInterceptionHistory() },
                             onOpenCalibration = { viewModel.openFigureEightCalibration() },
                             onSnapshotTrustedBaseline = { viewModel.snapshotTrustedBaseline() },
-                            onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) }
+                            onSetMaxDevices = { viewModel.setMaxVisibleDevices(it) },
+                            onTestGeminiConnection = { viewModel.testGeminiConnection() },
+                            onTestNetworkSpeed = { viewModel.runNetworkConnectivityAndSpeedTest() },
+                            onSetAiMode = { viewModel.setAiInferenceMode(it) },
+                            onSaveGeminiKey = { viewModel.saveGeminiApiKey(it) },
+                            onClearGeminiKey = { viewModel.clearGeminiApiKey() }
                         )
                     }
                 }
@@ -778,6 +820,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
             if (uiState.isFullScreenMapVisible) {
                 FullScreenRadarMapOverlay(
                     uiState = uiState,
+                    anomalies = viewModel.rfAnomalyEngine.anomalies.collectAsStateWithLifecycle().value,
                     onDismiss = { viewModel.toggleFullScreenMap(false) },
                     onZoomIn = { viewModel.zoomInMap() },
                     onZoomOut = { viewModel.zoomOutMap() },
@@ -789,21 +832,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                     onToggleFocusMode = { viewModel.toggleFocusMode() },
                     onTriggerAiPinpoint = { viewModel.startAiPinpoint(it) },
                     onCycleRadarBoost = { viewModel.cycleRadarBoostLevel() },
-                    onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
-                )
-            }
-
-            if (uiState.isRadarGridConfigDialogOpen) {
-                RadarGridConfigDialog(
-                    currentMode = uiState.radarGridMode,
-                    currentOpacity = uiState.radarGridOpacity,
-                    showCoverageRings = uiState.showCoverageRings,
-                    showDistanceTicks = uiState.showDistanceTicks,
-                    onSelectMode = { viewModel.setRadarGridMode(it) },
-                    onSetOpacity = { viewModel.setRadarGridOpacity(it) },
-                    onToggleCoverageRings = { viewModel.toggleCoverageRings() },
-                    onToggleDistanceTicks = { viewModel.toggleDistanceTicks() },
-                    onDismiss = { viewModel.closeRadarGridConfigDialog() }
+                    onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() },
+                    onAddSpatialPoint = { id, pt -> viewModel.addSpatialPoint(id, pt) }
                 )
             }
         }
@@ -1049,7 +1079,7 @@ fun TacticalHeader(
 
             uiState.nearestBlip?.let { nearest ->
                 Text(
-                    text = "NEAREST: ${nearest.name.take(10)} (${String.format("%.1fm", nearest.distance)})",
+                    text = "NEAREST: ${nearest.name.take(10)} (${String.format("%.1f ft", nearest.distance * 3.28084f)})",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall.copy(
@@ -1235,11 +1265,10 @@ fun QuickControlsCard(
             }
         }
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
+}@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SweepRadarScreen(
+    sonarState: SonarState = SonarState.IDLE,
     uiState: SignalRadarUiState,
     onToggleAudioSonar: () -> Unit,
     onTogglePerimeterAlarm: () -> Unit,
@@ -1268,9 +1297,41 @@ fun SweepRadarScreen(
     onRunAiDeepAudit: () -> Unit = {},
     onCycleRadarGridMode: () -> Unit = {},
     onOpenRadarGridConfig: () -> Unit = {},
+    onViewModeChanged: (ViewMode) -> Unit = {},
+    targetRssiThresholds: Map<String, Int> = emptyMap(),
+    targetDistanceThresholds: Map<String, Float> = emptyMap(),
+    onSetTargetRssiThreshold: (String, Int) -> Unit = { _, _ -> },
+    onSetTargetDistanceThreshold: (String, Float) -> Unit = { _, _ -> },
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
-    val filteredBlips = rememberFilteredBlips(
+    // 1. Core States for Interaction: Gestures, Modes & Controls
+    var recenterTriggerCount by remember { mutableStateOf(0) }
+    var isOrientationLockedByHeading by rememberSaveable { mutableStateOf(true) }
+    var isDockExpanded by rememberSaveable { mutableStateOf(false) }
+    var isSheetExpanded by rememberSaveable { mutableStateOf(false) }
+    var showDevDiagnosticsDialog by remember { mutableStateOf(false) }
+    var showAiThreatDialog by remember { mutableStateOf(false) }
+    var showLayersConfigDialog by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
+    var lastInteractionTime by remember { mutableStateOf(0L) }
+    val isInteracting = lastInteractionTime > 0L
+    LaunchedEffect(lastInteractionTime) {
+        if (lastInteractionTime > 0L) {
+            kotlinx.coroutines.delay(4000L)
+            lastInteractionTime = 0L
+        }
+    }
+    
+    // Smooth visualization mode selection
+    val selectedMode = uiState.viewMode
+    
+    // Smooth visibility alphas for transition
+    val radarAlpha by animateFloatAsState(targetValue = if (selectedMode == ViewMode.MAP) 0f else 1f, label = "radarAlpha")
+    val mapAlpha by animateFloatAsState(targetValue = if (selectedMode == ViewMode.RADAR) 0f else 1f, label = "mapAlpha")
+
+    // Filtered blips based on active filters and search query
+    val rawFilteredBlips = rememberFilteredBlips(
         blips = uiState.activeBlips,
         filterType = uiState.selectedFilterType,
         maxDevices = uiState.maxVisibleDevices,
@@ -1279,355 +1340,1229 @@ fun SweepRadarScreen(
         selectedTargetId = uiState.selectedTargetDeviceId,
         sortBy = uiState.sortByPriority
     )
-    var showControlBottomSheet by remember { mutableStateOf(false) }
+    
+    val filteredBlips = remember(rawFilteredBlips, searchQuery) {
+        if (searchQuery.isEmpty()) {
+            rawFilteredBlips
+        } else {
+            rawFilteredBlips.filter {
+                it.name.contains(searchQuery, ignoreCase = true) ||
+                it.id.contains(searchQuery, ignoreCase = true)
+            }
+        }
+    }
 
-    if (windowSizeClass.isExpandedOrLandscape) {
-        // Landscape or Wide Screen Two-Column Alignment Layout
-        Row(
+    // Selected blip state
+    val selectedTargetId = uiState.selectedTargetDeviceId
+    val selectedBlip = uiState.activeBlips.find { it.id == selectedTargetId }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF020704))
+            .testTag("sweep_radar_fullscreen_container")
+    ) {
+        // LAYER 1: Full-screen interactive map and radar scope
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            lastInteractionTime = System.currentTimeMillis()
+                        }
+                    }
+                }
         ) {
-            // Left Column: Filter Chips, Declutter Bar & Radar Scope Visualization
-            Column(
-                modifier = Modifier
-                    .weight(1.2f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChipsRow(
-                    selectedFilter = uiState.selectedFilterType,
-                    onFilterSelected = onFilterSelected
-                )
-
-                RadarFocusDeclutterBar(
-                    uiState = uiState,
-                    totalDiscoveredCount = uiState.activeBlips.size,
-                    displayedCount = filteredBlips.size,
-                    onToggleFocusMode = onToggleFocusMode,
-                    onSetMaxDevices = onSetMaxDevices,
-                    onSetMinRssi = onSetMinRssi,
-                    onToggleHudDeclutter = onToggleHudDeclutter,
-                    onSetSortBy = onSetSortBy
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .background(Color(0xFF08120E), RoundedCornerShape(20.dp))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                            RoundedCornerShape(20.dp)
-                        )
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    TacticalRadarCanvas(
-                        headingDegrees = uiState.headingDegrees,
-                        blips = filteredBlips,
-                        nearestBlipId = uiState.nearestBlip?.id,
-                        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
-                        mapRangeMeters = uiState.mapRangeMeters,
-                        isMapMaximized = uiState.isMapMaximized,
-                        isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
-                        isFocusModeEnabled = uiState.isFocusModeEnabled,
-                        maxVisibleDevices = uiState.maxVisibleDevices,
-                        radarBoostLevel = uiState.radarBoostLevel,
-                        onZoomIn = onZoomInMap,
-                        onZoomOut = onZoomOutMap,
+            when (selectedMode) {
+                ViewMode.MAP -> {
+                    GeographicMapView(
+                        headingDegrees = if (isOrientationLockedByHeading) uiState.headingDegrees else 0f,
+                        filteredBlips = filteredBlips,
+                        uiState = uiState,
+                        mapAlpha = mapAlpha,
+                        onZoomInMap = onZoomInMap,
+                        onZoomOutMap = onZoomOutMap,
                         onSetMapRange = onSetMapRange,
-                        onToggleMaximizeMap = onToggleMaximizeMap,
-                        onOpenFullScreenMap = onOpenFullScreenMap,
                         onSelectTargetDevice = onSelectTargetDevice,
-                        isFloorplanEnabled = uiState.isFloorplanEnabled,
                         onToggleFloorplan = onToggleFloorplan,
                         onToggleFocusMode = onToggleFocusMode,
                         onSetMaxDevices = onSetMaxDevices,
                         onCycleRadarBoost = onCycleRadarBoost,
                         onTriggerAiPinpoint = onTriggerAiPinpoint,
-                        radarGridMode = uiState.radarGridMode,
-                        radarGridOpacity = uiState.radarGridOpacity,
-                        showCoverageRings = uiState.showCoverageRings,
-                        showDistanceTicks = uiState.showDistanceTicks,
                         onCycleRadarGridMode = onCycleRadarGridMode,
-                        onOpenRadarGridConfig = onOpenRadarGridConfig
+                        onOpenRadarGridConfig = onOpenRadarGridConfig,
+                        recenterTriggerCount = recenterTriggerCount
                     )
-
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.Black.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                    ) {
-                        Text(
-                            text = "HEADING: ${uiState.headingDegrees.toInt()}°",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
+                }
+                ViewMode.RADAR -> {
+                    SignalSweepCanvasView(
+                        headingDegrees = if (isOrientationLockedByHeading) uiState.headingDegrees else 0f,
+                        filteredBlips = filteredBlips,
+                        uiState = uiState,
+                        radarAlpha = radarAlpha,
+                        onZoomInMap = onZoomInMap,
+                        onZoomOutMap = onZoomOutMap,
+                        onSetMapRange = onSetMapRange,
+                        onSelectTargetDevice = onSelectTargetDevice,
+                        onToggleFloorplan = onToggleFloorplan,
+                        onToggleFocusMode = onToggleFocusMode,
+                        onSetMaxDevices = onSetMaxDevices,
+                        onCycleRadarBoost = onCycleRadarBoost,
+                        onTriggerAiPinpoint = onTriggerAiPinpoint,
+                        onCycleRadarGridMode = onCycleRadarGridMode,
+                        onOpenRadarGridConfig = onOpenRadarGridConfig,
+                        recenterTriggerCount = recenterTriggerCount
+                    )
+                }
+                ViewMode.HYBRID -> {
+                    HybridRadarMapView(
+                        headingDegrees = if (isOrientationLockedByHeading) uiState.headingDegrees else 0f,
+                        filteredBlips = filteredBlips,
+                        uiState = uiState,
+                        radarAlpha = radarAlpha,
+                        mapAlpha = mapAlpha,
+                        onZoomInMap = onZoomInMap,
+                        onZoomOutMap = onZoomOutMap,
+                        onSetMapRange = onSetMapRange,
+                        onSelectTargetDevice = onSelectTargetDevice,
+                        onToggleFloorplan = onToggleFloorplan,
+                        onToggleFocusMode = onToggleFocusMode,
+                        onSetMaxDevices = onSetMaxDevices,
+                        onCycleRadarBoost = onCycleRadarBoost,
+                        onTriggerAiPinpoint = onTriggerAiPinpoint,
+                        onCycleRadarGridMode = onCycleRadarGridMode,
+                        onOpenRadarGridConfig = onOpenRadarGridConfig,
+                        recenterTriggerCount = recenterTriggerCount
+                    )
                 }
             }
+        }
 
-            // Right Column: Quick Control Hub & BLE Signal Database Tracker
+        // Empty state center indicator (if there are no blips)
+        if (filteredBlips.isEmpty()) {
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                CompassDeviceFinderCard(
-                    uiState = uiState,
-                    onSelectTargetDevice = onSelectTargetDevice,
-                    onToggleAudioSonar = onToggleAudioSonar,
-                    onOpenCalibration = onOpenCalibration,
-                    onTriggerAiPinpoint = onTriggerAiPinpoint,
-                    onCycleRadarBoost = onCycleRadarBoost
+                Text(
+                    text = "READY",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 2.sp
+                    ),
+                    color = Color(0xFF00FF66).copy(alpha = 0.6f)
                 )
-
-                QuickControlsCard(
-                    uiState = uiState,
-                    onToggleAudioSonar = onToggleAudioSonar,
-                    onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                    onToggleScanning = onToggleScanning,
-                    onSetMaxDevices = onSetMaxDevices,
-                    onToggleFocusMode = onToggleFocusMode
-                )
-
-                BleDatabaseTrackerCard(
-                    bleDevices = uiState.savedBleDevices,
-                    isScannerActive = uiState.isBleScannerServiceActive,
-                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                    isAudioSonarActive = uiState.isAudioSonarActive,
-                    onToggleScanner = onToggleBleScanner,
-                    onClearDatabase = onClearBleDb,
-                    onDeleteDevice = onDeleteBleDevice,
-                    onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
-                    onPlayTestPing = onPlayTestPing,
-                    onUpdateCatalogueTag = onUpdateBleCatalogueTag
+                Text(
+                    text = "WALK NATURALLY TO MAP SIGNALS",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    ),
+                    color = Color.Gray.copy(alpha = 0.8f)
                 )
             }
         }
-    } else {
-        // Portrait / Compact Column Layout with ModalBottomSheet for controls to avoid squishing
-        Column(
+
+        // LAYER 2: Minimal Translucent Glass Top Status Bar
+        AnimatedVisibility(
+            visible = !isInteracting,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
             modifier = Modifier
-                .fillMaxSize()
-                .padding(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            FilterChipsRow(
-                selectedFilter = uiState.selectedFilterType,
-                onFilterSelected = onFilterSelected
-            )
-
-            RadarFocusDeclutterBar(
-                uiState = uiState,
-                totalDiscoveredCount = uiState.activeBlips.size,
-                displayedCount = filteredBlips.size,
-                onToggleFocusMode = onToggleFocusMode,
-                onSetMaxDevices = onSetMaxDevices,
-                onSetMinRssi = onSetMinRssi,
-                onToggleHudDeclutter = onToggleHudDeclutter,
-                onSetSortBy = onSetSortBy
-            )
-
-            Box(
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF030705).copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f)),
+            shadowElevation = 8.dp
+        ) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .background(Color(0xFF08120E), RoundedCornerShape(16.dp))
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        RoundedCornerShape(16.dp)
-                    )
-                    .padding(6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                TacticalRadarCanvas(
-                    headingDegrees = uiState.headingDegrees,
-                    blips = filteredBlips,
-                    nearestBlipId = uiState.nearestBlip?.id,
-                    selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                    perimeterThresholdMeters = uiState.perimeterThresholdMeters,
-                    mapRangeMeters = uiState.mapRangeMeters,
-                    isMapMaximized = uiState.isMapMaximized,
-                    isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
-                    isFocusModeEnabled = uiState.isFocusModeEnabled,
-                    maxVisibleDevices = uiState.maxVisibleDevices,
-                    radarBoostLevel = uiState.radarBoostLevel,
-                    onZoomIn = onZoomInMap,
-                    onZoomOut = onZoomOutMap,
-                    onSetMapRange = onSetMapRange,
-                    onToggleMaximizeMap = onToggleMaximizeMap,
-                    onOpenFullScreenMap = onOpenFullScreenMap,
-                    onSelectTargetDevice = onSelectTargetDevice,
-                    isFloorplanEnabled = uiState.isFloorplanEnabled,
-                    onToggleFloorplan = onToggleFloorplan,
-                    onToggleFocusMode = onToggleFocusMode,
-                    onSetMaxDevices = onSetMaxDevices,
-                    onCycleRadarBoost = onCycleRadarBoost,
-                    onTriggerAiPinpoint = onTriggerAiPinpoint,
-                    radarGridMode = uiState.radarGridMode,
-                    radarGridOpacity = uiState.radarGridOpacity,
-                    showCoverageRings = uiState.showCoverageRings,
-                    showDistanceTicks = uiState.showDistanceTicks,
-                    onCycleRadarGridMode = onCycleRadarGridMode,
-                    onOpenRadarGridConfig = onOpenRadarGridConfig,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // Bottom Bar Actions in Portrait (AI Deep Audit + Tactical Controls Sheet)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = onRunAiDeepAudit,
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .height(46.dp)
-                        .testTag("radar_quick_ai_deep_audit_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00FF66),
-                        contentColor = Color.Black
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = "AI Deep Audit",
-                        modifier = Modifier.size(18.dp),
-                        tint = Color.Black
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
+                // Tactical Mode & Target telemetry info
+                Column {
                     Text(
-                        text = "AI DEEP AUDIT",
-                        style = MaterialTheme.typography.labelMedium.copy(
+                        text = if (selectedBlip != null) "RF TRACKING • CH ${selectedBlip.frequencyMhz}" else "RF SCANNING • HYBRID SCOPE",
+                        style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Black,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp
-                        )
+                        ),
+                        color = Color(0xFF00FF66)
+                    )
+                    Text(
+                        text = if (selectedBlip != null) "LOCK: ${selectedBlip.name} • ${selectedBlip.rssi} dBm" else "EST ALTITUDE: ${uiState.sensorSuite.estimatedAltitudeMeters.toInt()}m • ${filteredBlips.size} CHANNELS",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = Color.LightGray
                     )
                 }
 
-                Button(
-                    onClick = { showControlBottomSheet = true },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(46.dp)
-                        .testTag("open_tactical_controls_sheet"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                // Tiny non-blocking warning indicators (Multipath, sensor quality etc.)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Controls",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "CONTROLS",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp
+                    if (uiState.isRfJammingDetected) {
+                        TinyWarningBadge(text = "⚠ JAM", tooltip = "RF Jamming Interference Detected", color = Color.Red)
+                    }
+                    if (uiState.isGnssSpoofingDetected) {
+                        TinyWarningBadge(text = "⚠ GNSS", tooltip = "GNSS Spoofing Detected", color = Color(0xFFFF9800))
+                    }
+                    if (uiState.compassAccuracyScore < 80) {
+                        TinyWarningBadge(text = "⚠ SENS", tooltip = "Low Compass Accuracy: ${uiState.compassAccuracyScore}%", color = Color(0xFFFFCC00))
+                    }
+                    if (filteredBlips.size < 3) {
+                        TinyWarningBadge(text = "${4 - filteredBlips.size} more pts", tooltip = "Insufficient measurements", color = Color.Gray)
+                    }
+                }
+
+                // Small Sensor Status Badges (Icons & Labels)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SensorStatusIcon(name = "GPS", isActive = true)
+                    SensorStatusIcon(name = "AR", isActive = true)
+                    SensorStatusIcon(name = "BLE", isActive = uiState.isBleScannerServiceActive)
+                    SensorStatusIcon(name = "AI", isActive = uiState.copilotMessages.isNotEmpty() || uiState.isAiAnalyzingThreats)
+                }
+            }
+        }
+    }
+
+        // LAYER 3: Floating Mode Selector (MAP | RADAR | HYBRID) below top status bar
+        AnimatedVisibility(
+            visible = !isInteracting,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 64.dp)
+                .statusBarsPadding()
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = Color(0xFF05110A).copy(alpha = 0.88f),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.35f)),
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    listOf("MAP", "RADAR", "HYBRID").forEach { mode ->
+                        val isSelected = selectedMode.name == mode
+                        Surface(
+                            onClick = { onViewModeChanged(ViewMode.valueOf(mode)) },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) Color(0xFF00FF66) else Color.Transparent,
+                            modifier = Modifier.height(32.dp).width(75.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = mode,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp
+                                    ),
+                                    color = if (isSelected) Color.Black else Color(0xFF00FF66)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // LAYER 4: Collapsible Floating Control Dock (at the Bottom-Right)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = if (isSheetExpanded) 430.dp else 100.dp, end = 16.dp)
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.BottomEnd
+        ) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Expanded Dock Actions
+                AnimatedVisibility(
+                    visible = isDockExpanded,
+                    enter = slideInVertically { h -> h } + fadeIn(),
+                    exit = slideOutVertically { h -> h } + fadeOut()
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Layers Settings Configuration Trigger
+                        FloatingDockIcon(
+                            icon = Icons.Default.Layers,
+                            label = "Layers",
+                            onClick = { showLayersConfigDialog = true }
                         )
+
+                        // Toggle Floorplan Map Overlays
+                        FloatingDockIcon(
+                            icon = Icons.Default.Map,
+                            label = "Floorplan",
+                            isActive = uiState.isFloorplanEnabled,
+                            onClick = onToggleFloorplan
+                        )
+
+                        // Clear Data / Measurements Reset
+                        FloatingDockIcon(
+                            icon = Icons.Default.Refresh,
+                            label = "Recalibrate",
+                            onClick = onClearBleDb
+                        )
+
+                        // Switch focus modes
+                        FloatingDockIcon(
+                            icon = Icons.Default.FilterList,
+                            label = "Focus Mode",
+                            isActive = uiState.isFocusModeEnabled,
+                            onClick = onToggleFocusMode
+                        )
+
+                        // AI Threat bottom sheet trigger
+                        FloatingDockIcon(
+                            icon = Icons.Default.Info,
+                            label = "AI Insight",
+                            onClick = { showAiThreatDialog = true }
+                        )
+
+                        // Developer Diagnostics Menu Option
+                        FloatingDockIcon(
+                            icon = Icons.Default.Settings,
+                            label = "Diagnostics",
+                            onClick = { showDevDiagnosticsDialog = true }
+                        )
+                    }
+                }
+
+                // Dock Main Controller Hub Button Row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // ◎ Scan Controller Button
+                    FloatingDockIcon(
+                        icon = if (uiState.isScanningActive) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        label = if (uiState.isScanningActive) "SCANNING" else "PAUSED",
+                        isActive = uiState.isScanningActive,
+                        activeColor = Color(0xFF00FF66),
+                        onClick = onToggleScanning
+                    )
+
+                    // ◉ Target Finder & Audio Sonar Button
+                    FloatingDockIcon(
+                        icon = if (uiState.isAudioSonarActive) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                        label = "SONAR",
+                        isActive = uiState.isAudioSonarActive,
+                        activeColor = Color(0xFF00E5FF),
+                        onClick = onToggleAudioSonar
+                    )
+
+                    // ⌖ Recenter Camera / Reset Transforms Button
+                    FloatingDockIcon(
+                        icon = Icons.Default.MyLocation,
+                        label = "RECENTER",
+                        onClick = {
+                            recenterTriggerCount++
+                        }
+                    )
+
+                    // ≡ Menu Toggle Button
+                    FloatingDockIcon(
+                        icon = if (isDockExpanded) Icons.Default.Close else Icons.Default.Menu,
+                        label = "TOOLS",
+                        isActive = isDockExpanded,
+                        activeColor = Color(0xFF00FF66),
+                        onClick = { isDockExpanded = !isDockExpanded }
                     )
                 }
             }
         }
 
-        if (showControlBottomSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showControlBottomSheet = false },
-                containerColor = Color(0xFF060F0B),
-                contentColor = Color.White,
-                scrimColor = Color.Black.copy(alpha = 0.7f),
-                modifier = Modifier.testTag("tactical_controls_modal_sheet")
+        // Floating horizontal scrollable list overlay of currently detected devices
+        AnimatedVisibility(
+            visible = !isSheetExpanded && filteredBlips.isNotEmpty(),
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 68.dp) // Sits perfectly above the collapsed 56.dp bottom sheet
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(
+                // Header row
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .padding(horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text(
+                        text = "DETECTED DEVICES IN RANGE (${filteredBlips.size})",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            letterSpacing = 1.sp
+                        ),
+                        color = Color(0xFF00FF66).copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = "TAP TO LOCK TARGET",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = Color.Gray
+                    )
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("floating_detected_devices_row")
+                ) {
+                    items(filteredBlips) { blip ->
+                        val isSelected = blip.id == selectedTargetId
+                        val nodeColor = when (blip.type.uppercase()) {
+                            "WIFI" -> Color(0xFF00FF66)
+                            "CELLULAR" -> Color(0xFFFF3366)
+                            "BLE" -> Color(0xFF00E5FF)
+                            "MAGNETIC" -> Color(0xFFFF00FF)
+                            else -> Color(0xFFFFCC00)
+                        }
+
+                        Surface(
+                            onClick = {
+                                if (isSelected) {
+                                    onSelectTargetDevice(null)
+                                } else {
+                                    onSelectTargetDevice(blip.id)
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.15f) else Color(0xFF030705).copy(alpha = 0.85f),
+                            border = BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) Color(0xFF00FF66) else Color(0xFF00FF66).copy(alpha = 0.25f)
+                            ),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .width(150.dp)
+                                .testTag("detected_device_card_${blip.id}")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Device Type Indicator / Badge
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = nodeColor.copy(alpha = 0.15f),
+                                        border = BorderStroke(0.5.dp, nodeColor.copy(alpha = 0.6f))
+                                    ) {
+                                        Text(
+                                            text = blip.type.uppercase(),
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 7.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = nodeColor,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+
+                                    // Signal strength (RSSI)
+                                    Text(
+                                        text = "${blip.rssi} dBm",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = if (blip.rssi > -60) Color(0xFF00FF66) else Color.White
+                                    )
+                                }
+
+                                Text(
+                                    text = blip.name,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp
+                                    ),
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = blip.distance.toFeetString(1),
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp
+                                        ),
+                                        color = Color.LightGray
+                                    )
+
+                                    if (isSelected) {
+                                        Surface(
+                                            shape = RoundedCornerShape(3.dp),
+                                            color = Color(0xFFFFCC00),
+                                        ) {
+                                            Text(
+                                                text = "LOCKED",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 7.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = Color.Black
+                                                ),
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // LAYER 5: Swipeable Glassmorphic Target Information Bottom Sheet
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(if (isSheetExpanded) 420.dp else 56.dp)
+                .navigationBarsPadding(),
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            color = Color(0xFF030705).copy(alpha = 0.90f),
+            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.35f)),
+            shadowElevation = 16.dp
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Drag Handle / Collapsed Ribbon Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clickable { isSheetExpanded = !isSheetExpanded }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSheetExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                            contentDescription = "Toggle Sheet",
+                            tint = Color(0xFF00FF66)
+                        )
+                        if (selectedBlip != null) {
+                            Text(
+                                text = "LOCKED: ${selectedBlip.name}",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 12.sp
+                                ),
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF00FF66).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = "${selectedBlip.rssi} dBm",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = Color(0xFF00FF66),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "NO TARGET LOCKED • SELECT EMITTER TO BEGIN",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 9.sp,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "DEVICES: ${uiState.activeBlips.size}",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            color = Color.LightGray
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = if (uiState.isScanningActive) Color(0xFF00FF66) else Color.Red,
+                            modifier = Modifier.size(8.dp)
+                        ) {}
+                    }
+                }
+
+                if (isSheetExpanded) {
+                    HorizontalDivider(color = Color(0xFF00FF66).copy(alpha = 0.25f))
+
+                    // Detail area contents
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        if (selectedBlip != null) {
+                            // Target lock summary detail
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = selectedBlip.name,
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black
+                                        ),
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "BSSID: [${selectedBlip.id}] • CH: ${selectedBlip.frequencyMhz} MHz",
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = Color.Gray
+                                    )
+                                }
+
+                                Button(
+                                    onClick = { onTriggerAiPinpoint(selectedBlip) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF00FF66),
+                                        contentColor = Color.Black
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Lock, contentDescription = "Pinpoint", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "AI PINPOINT",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Sliders for dynamic alerts and perimeter breach configuration
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val currentTargetDistThreshold = targetDistanceThresholds[selectedBlip.id] ?: uiState.perimeterThresholdMeters
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Perimeter Alert Limit",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.LightGray
+                                    )
+                                    Text(
+                                        text = currentTargetDistThreshold.toFeetString(1),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = Color(0xFF00FF66)
+                                    )
+                                }
+                                Slider(
+                                    value = currentTargetDistThreshold,
+                                    onValueChange = { onSetTargetDistanceThreshold(selectedBlip.id, it) },
+                                    valueRange = 1.0f..15.0f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color(0xFF00FF66),
+                                        activeTrackColor = Color(0xFF00FF66),
+                                        inactiveTrackColor = Color(0xFF152A1D)
+                                    )
+                                )
+
+                                val currentTargetRssiThreshold = targetRssiThresholds[selectedBlip.id] ?: uiState.rssiAlertThresholdDbm
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "RSSI Alert Threshold",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.LightGray
+                                    )
+                                    Text(
+                                        text = "${currentTargetRssiThreshold} dBm",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                        color = Color(0xFF00E5FF)
+                                    )
+                                }
+                                Slider(
+                                    value = currentTargetRssiThreshold.toFloat(),
+                                    onValueChange = { onSetTargetRssiThreshold(selectedBlip.id, it.toInt()) },
+                                    valueRange = -95.0f..-40.0f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = Color(0xFF00E5FF),
+                                        activeTrackColor = Color(0xFF00E5FF),
+                                        inactiveTrackColor = Color(0xFF152A1D)
+                                    )
+                                )
+                            }
+                        }
+
+                        // Search box to filter device catalog
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("SEARCH CHANNELS / BSSID / NAME", color = Color.Gray, fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = Color.White),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF00FF66),
+                                unfocusedBorderColor = Color(0xFF00FF66).copy(alpha = 0.3f),
+                                focusedContainerColor = Color(0xFF040A07),
+                                unfocusedContainerColor = Color(0xFF020503)
+                            ),
+                            singleLine = true
+                        )
+
+                        // Unified BLE Catalog & Emitter Database List
+                        Text(
+                            text = "ACTIVE EMITTER CATALOG",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            ),
+                            color = Color(0xFF00FF66)
+                        )
+
+                        filteredBlips.forEach { blip ->
+                            val isBlipSelected = blip.id == selectedTargetId
+                            Surface(
+                                onClick = { onSelectTargetDevice(blip.id) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isBlipSelected) Color(0xFF05110A) else Color(0xFF030705),
+                                border = BorderStroke(1.dp, if (isBlipSelected) Color(0xFF00FF66) else Color.Gray.copy(alpha = 0.2f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = blip.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "${blip.type} • ${blip.frequencyMhz} MHz • DIST: ${blip.distance.toFeetString(1)}",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                            color = Color.Gray
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "${blip.rssi} dBm",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black
+                                        ),
+                                        color = if (blip.rssi > -60) Color(0xFF00FF66) else Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // LAYER 6: Non-Blocking Overlay Dialogs
+    
+    // 1. Developer Diagnostics Overlay dialog
+    if (showDevDiagnosticsDialog) {
+        Dialog(onDismissRequest = { showDevDiagnosticsDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF05110A),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "DEVELOPER DIAGNOSTICS",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00FF66)
+                    )
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DiagnosticMetricRow("SCAN RATE", "60 FPS (HW OVERCLOCK)")
+                        DiagnosticMetricRow("IMSI RISK", uiState.imsiCatcherAlert.severity)
+                        DiagnosticMetricRow("MAGNETOMETER", "%.1f µT".format(uiState.magnetometerData.totalMicroTesla))
+                        DiagnosticMetricRow("CALIBRATION STATE", "${uiState.compassAccuracyScore}% STABLE")
+                        DiagnosticMetricRow("ACTIVE SENSORS", "${uiState.activeAntennaCount} INTERFACES")
+                        DiagnosticMetricRow("ACOUSTIC FREQ", "${uiState.acousticData.dominantFrequencyHz} Hz")
+                    }
+
+                    Button(
+                        onClick = { showDevDiagnosticsDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF66), contentColor = Color.Black),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("CLOSE DIAGNOSTICS")
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. AI Threat Assessment Overlay Dialog
+    if (showAiThreatDialog) {
+        Dialog(onDismissRequest = { showAiThreatDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF05110A),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "GEMINI AI ANALYSIS",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00FF66)
+                    )
+
+                    Button(
+                        onClick = { onRunAiDeepAudit() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF66), contentColor = Color.Black),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("RUN DEEP SIGNAL AUDIT")
+                    }
+
+                    Text(
+                        text = uiState.threatAnalysisReport?.executiveSummary ?: "Evidence is ready. Trigger Deep Signal Audit to let Gemini cross-correlate active RF fingerprints and check for anomalies.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = Color.LightGray
+                    )
+
+                    Button(
+                        onClick = { showAiThreatDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f), contentColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("BACK TO RADAR")
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Layers overlay configuration dialog
+    if (showLayersConfigDialog) {
+        Dialog(onDismissRequest = { showLayersConfigDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF05110A),
+                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.5f)),
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "RADAR GRID LAYERS",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFF00FF66)
+                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "TACTICAL CONTROLS & BLE TRACKER",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.primary
+                        Text("Concentric Coverage Rings", color = Color.White, fontSize = 12.sp)
+                        Switch(
+                            checked = uiState.showCoverageRings,
+                            onCheckedChange = { onToggleHudDeclutter() } // toggles or triggers configuration
                         )
-                        IconButton(onClick = { showControlBottomSheet = false }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White
-                            )
-                        }
                     }
 
-                    CompassDeviceFinderCard(
-                        uiState = uiState,
-                        onSelectTargetDevice = onSelectTargetDevice,
-                        onToggleAudioSonar = onToggleAudioSonar,
-                        onOpenCalibration = onOpenCalibration,
-                        onTriggerAiPinpoint = onTriggerAiPinpoint,
-                        onCycleRadarBoost = onCycleRadarBoost
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Distance Labels / Tick Tocks", color = Color.White, fontSize = 12.sp)
+                        Switch(
+                            checked = uiState.showDistanceTicks,
+                            onCheckedChange = { onCycleRadarGridMode() }
+                        )
+                    }
 
-                    QuickControlsCard(
-                        uiState = uiState,
-                        onToggleAudioSonar = onToggleAudioSonar,
-                        onTogglePerimeterAlarm = onTogglePerimeterAlarm,
-                        onToggleScanning = onToggleScanning,
-                        onSetMaxDevices = onSetMaxDevices,
-                        onToggleFocusMode = onToggleFocusMode
-                    )
-
-                    BleDatabaseTrackerCard(
-                        bleDevices = uiState.savedBleDevices,
-                        isScannerActive = uiState.isBleScannerServiceActive,
-                        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
-                        isAudioSonarActive = uiState.isAudioSonarActive,
-                        onToggleScanner = onToggleBleScanner,
-                        onClearDatabase = onClearBleDb,
-                        onDeleteDevice = onDeleteBleDevice,
-                        onSelectTargetDevice = { id -> onSelectTargetDevice(id) },
-                        onPlayTestPing = onPlayTestPing,
-                        onUpdateCatalogueTag = onUpdateBleCatalogueTag
-                    )
+                    Button(
+                        onClick = { showLayersConfigDialog = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF66), contentColor = Color.Black),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("APPLY LAYERS")
+                    }
                 }
             }
         }
     }
 }
 
+@Composable
+fun GeographicMapView(
+    headingDegrees: Float,
+    filteredBlips: List<RadarBlip>,
+    uiState: SignalRadarUiState,
+    mapAlpha: Float,
+    onZoomInMap: () -> Unit,
+    onZoomOutMap: () -> Unit,
+    onSetMapRange: (Float) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit,
+    onToggleFloorplan: () -> Unit,
+    onToggleFocusMode: () -> Unit,
+    onSetMaxDevices: (Int) -> Unit,
+    onCycleRadarBoost: () -> Unit,
+    onTriggerAiPinpoint: (RadarBlip) -> Unit,
+    onCycleRadarGridMode: () -> Unit,
+    onOpenRadarGridConfig: () -> Unit,
+    recenterTriggerCount: Int
+) {
+    TacticalRadarCanvas(
+        headingDegrees = headingDegrees,
+        blips = filteredBlips,
+        nearestBlipId = uiState.nearestBlip?.id,
+        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+        mapRangeMeters = uiState.mapRangeMeters,
+        isMapMaximized = true,
+        isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+        isFocusModeEnabled = uiState.isFocusModeEnabled,
+        maxVisibleDevices = uiState.maxVisibleDevices,
+        radarBoostLevel = uiState.radarBoostLevel,
+        radarGridMode = RadarGridMode.OFF, // Force radar grids OFF for pure geographical/CAD map feel
+        radarGridOpacity = 0f, // No radar grid
+        showCoverageRings = false, // No coverage rings
+        showDistanceTicks = false, // No distance ticks
+        onZoomIn = onZoomInMap,
+        onZoomOut = onZoomOutMap,
+        onSetMapRange = onSetMapRange,
+        onToggleMaximizeMap = {},
+        onOpenFullScreenMap = {},
+        onSelectTargetDevice = onSelectTargetDevice,
+        isFloorplanEnabled = true, // Force floorplans ON
+        onToggleFloorplan = onToggleFloorplan,
+        onToggleFocusMode = onToggleFocusMode,
+        onSetMaxDevices = onSetMaxDevices,
+        onCycleRadarBoost = onCycleRadarBoost,
+        onTriggerAiPinpoint = onTriggerAiPinpoint,
+        onCycleRadarGridMode = onCycleRadarGridMode,
+        onOpenRadarGridConfig = onOpenRadarGridConfig,
+        recenterTriggerCount = recenterTriggerCount,
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Composable
+fun SignalSweepCanvasView(
+    headingDegrees: Float,
+    filteredBlips: List<RadarBlip>,
+    uiState: SignalRadarUiState,
+    radarAlpha: Float,
+    onZoomInMap: () -> Unit,
+    onZoomOutMap: () -> Unit,
+    onSetMapRange: (Float) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit,
+    onToggleFloorplan: () -> Unit,
+    onToggleFocusMode: () -> Unit,
+    onSetMaxDevices: (Int) -> Unit,
+    onCycleRadarBoost: () -> Unit,
+    onTriggerAiPinpoint: (RadarBlip) -> Unit,
+    onCycleRadarGridMode: () -> Unit,
+    onOpenRadarGridConfig: () -> Unit,
+    recenterTriggerCount: Int
+) {
+    TacticalRadarCanvas(
+        headingDegrees = headingDegrees,
+        blips = filteredBlips,
+        nearestBlipId = uiState.nearestBlip?.id,
+        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+        mapRangeMeters = uiState.mapRangeMeters,
+        isMapMaximized = true,
+        isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+        isFocusModeEnabled = uiState.isFocusModeEnabled,
+        maxVisibleDevices = uiState.maxVisibleDevices,
+        radarBoostLevel = uiState.radarBoostLevel,
+        radarGridMode = uiState.radarGridMode,
+        radarGridOpacity = uiState.radarGridOpacity * radarAlpha,
+        showCoverageRings = uiState.showCoverageRings,
+        showDistanceTicks = uiState.showDistanceTicks,
+        onZoomIn = onZoomInMap,
+        onZoomOut = onZoomOutMap,
+        onSetMapRange = onSetMapRange,
+        onToggleMaximizeMap = {},
+        onOpenFullScreenMap = {},
+        onSelectTargetDevice = onSelectTargetDevice,
+        isFloorplanEnabled = false, // Force floorplan GIS OFF for pure radar sweep
+        onToggleFloorplan = onToggleFloorplan,
+        onToggleFocusMode = onToggleFocusMode,
+        onSetMaxDevices = onSetMaxDevices,
+        onCycleRadarBoost = onCycleRadarBoost,
+        onTriggerAiPinpoint = onTriggerAiPinpoint,
+        onCycleRadarGridMode = onCycleRadarGridMode,
+        onOpenRadarGridConfig = onOpenRadarGridConfig,
+        recenterTriggerCount = recenterTriggerCount,
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Composable
+fun HybridRadarMapView(
+    headingDegrees: Float,
+    filteredBlips: List<RadarBlip>,
+    uiState: SignalRadarUiState,
+    radarAlpha: Float,
+    mapAlpha: Float,
+    onZoomInMap: () -> Unit,
+    onZoomOutMap: () -> Unit,
+    onSetMapRange: (Float) -> Unit,
+    onSelectTargetDevice: (String?) -> Unit,
+    onToggleFloorplan: () -> Unit,
+    onToggleFocusMode: () -> Unit,
+    onSetMaxDevices: (Int) -> Unit,
+    onCycleRadarBoost: () -> Unit,
+    onTriggerAiPinpoint: (RadarBlip) -> Unit,
+    onCycleRadarGridMode: () -> Unit,
+    onOpenRadarGridConfig: () -> Unit,
+    recenterTriggerCount: Int
+) {
+    TacticalRadarCanvas(
+        headingDegrees = headingDegrees,
+        blips = filteredBlips,
+        nearestBlipId = uiState.nearestBlip?.id,
+        selectedTargetDeviceId = uiState.selectedTargetDeviceId,
+        perimeterThresholdMeters = uiState.perimeterThresholdMeters,
+        mapRangeMeters = uiState.mapRangeMeters,
+        isMapMaximized = true,
+        isHudDeclutterEnabled = uiState.isHudDeclutterEnabled,
+        isFocusModeEnabled = uiState.isFocusModeEnabled,
+        maxVisibleDevices = uiState.maxVisibleDevices,
+        radarBoostLevel = uiState.radarBoostLevel,
+        radarGridMode = uiState.radarGridMode,
+        radarGridOpacity = uiState.radarGridOpacity * radarAlpha,
+        showCoverageRings = uiState.showCoverageRings,
+        showDistanceTicks = uiState.showDistanceTicks,
+        onZoomIn = onZoomInMap,
+        onZoomOut = onZoomOutMap,
+        onSetMapRange = onSetMapRange,
+        onToggleMaximizeMap = {},
+        onOpenFullScreenMap = {},
+        onSelectTargetDevice = onSelectTargetDevice,
+        isFloorplanEnabled = uiState.isFloorplanEnabled && (mapAlpha > 0.5f),
+        onToggleFloorplan = onToggleFloorplan,
+        onToggleFocusMode = onToggleFocusMode,
+        onSetMaxDevices = onSetMaxDevices,
+        onCycleRadarBoost = onCycleRadarBoost,
+        onTriggerAiPinpoint = onTriggerAiPinpoint,
+        onCycleRadarGridMode = onCycleRadarGridMode,
+        onOpenRadarGridConfig = onOpenRadarGridConfig,
+        recenterTriggerCount = recenterTriggerCount,
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Composable
+fun TinyWarningBadge(text: String, tooltip: String, color: Color) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = color.copy(alpha = 0.15f),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.6f))
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold
+            ),
+            color = color,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+fun SensorStatusIcon(name: String, isActive: Boolean) {
+    Surface(
+        shape = CircleShape,
+        color = if (isActive) Color(0xFF00FF66).copy(alpha = 0.15f) else Color.Red.copy(alpha = 0.1f),
+        border = BorderStroke(1.dp, if (isActive) Color(0xFF00FF66).copy(alpha = 0.4f) else Color.Red.copy(alpha = 0.3f)),
+        modifier = Modifier.size(18.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = name.take(1),
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Black
+                ),
+                color = if (isActive) Color(0xFF00FF66) else Color.Red
+            )
+        }
+    }
+}
+
+@Composable
+fun FloatingDockIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    isActive: Boolean = false,
+    activeColor: Color = Color(0xFF00FF66),
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = if (isActive) activeColor.copy(alpha = 0.25f) else Color(0xFF05110A).copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, if (isActive) activeColor else Color(0xFF00FF66).copy(alpha = 0.4f)),
+            modifier = Modifier.size(48.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (isActive) activeColor else Color(0xFF00FF66),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DiagnosticMetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+            color = Color.Gray
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+            color = Color.White
+        )
+    }
+}
 @Composable
 fun FilterChipsRow(
     selectedFilter: String,
@@ -1817,9 +2752,9 @@ fun PhoneAntennaArrayCard(telemetryList: List<AntennaTelemetry>) {
         }
     }
 }
-
 @Composable
 fun PinpointDeviceHUDCard(
+    sonarState: SonarState = SonarState.IDLE,
     uiState: SignalRadarUiState,
     onUnlockTarget: () -> Unit,
     onToggleAudioSonar: () -> Unit,
@@ -1827,6 +2762,7 @@ fun PinpointDeviceHUDCard(
     modifier: Modifier = Modifier
 ) {
     CompassDeviceFinderCard(
+        sonarState = sonarState,
         uiState = uiState,
         onSelectTargetDevice = { id -> if (id == null) onUnlockTarget() },
         onToggleAudioSonar = onToggleAudioSonar,
@@ -1841,7 +2777,8 @@ fun SpectrumInterceptCard(
     perimeterThresholdMeters: Float,
     selectedTargetDeviceId: String? = null,
     onSelectTargetDevice: ((String?) -> Unit)? = null,
-    onInterrogateGatt: ((RadarBlip) -> Unit)? = null
+    onInterrogateGatt: ((RadarBlip) -> Unit)? = null,
+    correlations: List<CorrelationEvent> = emptyList()
 ) {
     val isSelectedTarget = selectedTargetDeviceId != null &&
             (blip.id == selectedTargetDeviceId || blip.name == selectedTargetDeviceId)
@@ -1856,9 +2793,14 @@ fun SpectrumInterceptCard(
         ),
         border = BorderStroke(
             1.5.dp,
-            if (isSelectedTarget) Color(0xFF00FF66)
-            else if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            when {
+                isSelectedTarget -> Color(0xFF00FF66)
+                blip.baselineState == BaselineState.ANOMALOUS -> Color(0xFFFF3366)
+                blip.baselineState == BaselineState.CHANGED -> Color(0xFFFF8800)
+                blip.baselineState == BaselineState.NEW -> Color(0xFFFFCC00)
+                blip.distance < perimeterThresholdMeters -> MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            }
         )
     ) {
         Column(
@@ -1885,6 +2827,23 @@ fun SpectrumInterceptCard(
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        if (blip.baselineState != BaselineState.UNKNOWN) {
+                            val stateColor = when (blip.baselineState) {
+                                BaselineState.KNOWN -> Color(0xFF00E5FF)
+                                BaselineState.NEW -> Color(0xFFFFCC00)
+                                BaselineState.CHANGED -> Color(0xFFFF8800)
+                                BaselineState.ANOMALOUS -> Color(0xFFFF3366)
+                                else -> Color.Gray
+                            }
+                            Surface(shape = RoundedCornerShape(4.dp), color = stateColor.copy(alpha = 0.2f), border = BorderStroke(1.dp, stateColor)) {
+                                Text(
+                                    text = blip.baselineState.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace),
+                                    color = stateColor,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         if (isSelectedTarget) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -1920,7 +2879,7 @@ fun SpectrumInterceptCard(
                         color = if (blip.distance < perimeterThresholdMeters) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                     ) {
                         Text(
-                            text = "${String.format("%.1f", blip.distance)}m",
+                            text = "${String.format("%.1f", blip.distance * 3.28084f)}m",
                             style = MaterialTheme.typography.labelMedium.copy(
                                 fontWeight = FontWeight.Black,
                                 fontFamily = FontFamily.Monospace
@@ -2033,12 +2992,91 @@ fun SpectrumInterceptCard(
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             }
+            if (blip.fingerprintId != null) {
+                val conf = blip.fingerprintConfidence ?: 0f
+                val confColor = if (conf > 0.9f) Color(0xFF00FF66) else if (conf > 0.7f) Color(0xFFFFCC00) else Color(0xFFFF3366)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(Color(0xFF0A1A10), RoundedCornerShape(4.dp)).padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = "SIGNAL FINGERPRINT", style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace), color = Color.Gray)
+                        Text(text = blip.fingerprintId.take(8).uppercase(), style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace), color = Color(0xFF00E5FF))
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(text = "Match confidence: ${String.format("%.2f", conf)}", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace), color = confColor)
+                        Text(text = if (conf > 0.8f) "Possible persistent emitter" else "New signal pattern", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, fontFamily = FontFamily.Monospace), color = Color.Gray)
+                    }
+                }
+            }
+            if (isSelectedTarget && blip.anomalyResult != null) {
+                val anomaly = blip.anomalyResult
+                val categoryColor = when (anomaly.category) {
+                    AnomalyCategory.HIGH_DEVIATION -> Color(0xFFFF3366)
+                    AnomalyCategory.MODERATE_DEVIATION -> Color(0xFFFF8800)
+                    AnomalyCategory.LOW_DEVIATION -> Color(0xFFFFCC00)
+                    AnomalyCategory.NORMAL -> Color(0xFF00FF66)
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(6.dp)).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "ANOMALY EXPLANATION", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface)
+                        Text(text = "${anomaly.score} / 100", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = categoryColor)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "Confidence: ${String.format("%.0f", anomaly.confidence * 100)}% | Category: ${anomaly.category.name.replace("_", " ")}", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace), color = Color.Gray)
+                        if (anomaly.previousScore != null) {
+                            Text(text = "Prev: ${anomaly.previousScore}", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontFamily = FontFamily.Monospace), color = Color.Gray)
+                        }
+                    }
+                    
+                    if (anomaly.explanations.isNotEmpty()) {
+                        androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), modifier = Modifier.padding(vertical = 4.dp))
+                        anomaly.explanations.forEach { exp ->
+                            val sign = if (exp.scoreImpact > 0) "+" else ""
+                            val impactColor = if (exp.scoreImpact > 0) Color(0xFFFF8800) else if (exp.scoreImpact < 0) Color(0xFF00FF66) else Color.Gray
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(text = exp.description, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(text = "$sign${exp.scoreImpact}", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp), color = impactColor)
+                            }
+                        }
+                    }
+                }
+            }
+            if (isSelectedTarget && correlations.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).background(Color(0xFF111A22), RoundedCornerShape(6.dp)).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(text = "CORRELATED EVENTS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace), color = Color(0xFF00E5FF))
+                    correlations.forEach { event ->
+                        val otherObs = event.observations.firstOrNull { it.id != blip.id }
+                        if (otherObs != null) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column {
+                                    Text(text = otherObs.type, style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 10.sp), color = Color.White)
+                                    Text(text = "Δt: ${event.maxTimeSeparationMs}ms", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 9.sp), color = Color.Gray)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(text = "Score: ${String.format("%.2f", event.correlationScore)}", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp), color = if (event.correlationScore > 0.7f) Color(0xFF00FF66) else Color(0xFFFFCC00))
+                                    Text(text = event.spatialRelationship.name, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 8.sp), color = Color.Gray)
+                                }
+                            }
+                            Text(text = event.notes, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 8.sp), color = Color.DarkGray)
+                            androidx.compose.material3.HorizontalDivider(color = Color.DarkGray.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
-
 @Composable
 fun SpectrumAnalyzerScreen(
+    sonarState: SonarState = SonarState.IDLE,
     uiState: SignalRadarUiState,
     onFilterSelected: (String) -> Unit,
     onSelectTargetDevice: (String?) -> Unit = {},
@@ -2046,6 +3084,8 @@ fun SpectrumAnalyzerScreen(
     onOpenArCameraForTarget: (String) -> Unit = {},
     onOpenCalibration: () -> Unit = {},
     onInterrogateGatt: ((RadarBlip) -> Unit)? = null,
+    onToggleLearning: () -> Unit = {},
+    onResetBaseline: () -> Unit = {},
     windowSizeClass: WindowSizeClass = rememberWindowSizeClass()
 ) {
     val filteredBlips = rememberFilteredBlips(
@@ -2072,8 +3112,14 @@ fun SpectrumAnalyzerScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                EnvironmentalBaselineCard(
+                    summary = uiState.baselineSummary,
+                    onToggleLearning = onToggleLearning,
+                    onResetBaseline = onResetBaseline
+                )
                 if (uiState.selectedTargetDeviceId != null) {
                     PinpointDeviceHUDCard(
+                        sonarState = sonarState,
                         uiState = uiState,
                         onUnlockTarget = { onSelectTargetDevice(null) },
                         onToggleAudioSonar = onToggleAudioSonar,
@@ -2125,7 +3171,8 @@ fun SpectrumAnalyzerScreen(
                             perimeterThresholdMeters = uiState.perimeterThresholdMeters,
                             selectedTargetDeviceId = uiState.selectedTargetDeviceId,
                             onSelectTargetDevice = onSelectTargetDevice,
-                            onInterrogateGatt = onInterrogateGatt
+                            onInterrogateGatt = onInterrogateGatt,
+                            correlations = uiState.correlationEvents.filter { event -> event.observations.any { it.id == blip.id } }
                         )
                     }
                 }
@@ -2138,9 +3185,17 @@ fun SpectrumAnalyzerScreen(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                EnvironmentalBaselineCard(
+                    summary = uiState.baselineSummary,
+                    onToggleLearning = onToggleLearning,
+                    onResetBaseline = onResetBaseline
+                )
+            }
             if (uiState.selectedTargetDeviceId != null) {
                 item {
                     PinpointDeviceHUDCard(
+                        sonarState = sonarState,
                         uiState = uiState,
                         onUnlockTarget = { onSelectTargetDevice(null) },
                         onToggleAudioSonar = onToggleAudioSonar,
@@ -2797,7 +3852,6 @@ fun MagnetometerScreen(
         }
     }
 }
-
 @Composable
 fun SecurityGuardScreen(
     uiState: SignalRadarUiState,
@@ -2861,7 +3915,7 @@ fun SecurityGuardScreen(
                 // Threshold Slider
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "Boundary Radius: ${uiState.perimeterThresholdMeters.toInt()} Meters",
+                        text = "Boundary Radius: ${uiState.perimeterThresholdMeters.toInt()} Feet",
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -2941,7 +3995,6 @@ fun SecurityGuardScreen(
         }
     }
 }
-
 @Composable
 fun CsvLogConsoleScreen(
     uiState: SignalRadarUiState,
@@ -3062,6 +4115,7 @@ fun BottomRadarNavBar(
                     ) {
                         Icon(
                             imageVector = when (tab) {
+                                RadarTab.SIMULATION_LAB -> Icons.Default.Settings
                                 RadarTab.SWEEP_RADAR -> Icons.Default.Radar
                                 RadarTab.FULL_RADAR -> Icons.Default.Radar
                                 RadarTab.AI_THREAT_ANALYSIS -> Icons.Default.Security
@@ -3069,10 +4123,15 @@ fun BottomRadarNavBar(
                                 RadarTab.SPECTRUM_ANALYZER -> Icons.Default.GraphicEq
                                 RadarTab.DETECTED_SENSORS -> Icons.Default.Sensors
                                 RadarTab.HISTORIC_HEATMAP -> Icons.Default.Map
+                                RadarTab.ENVIRONMENT_MAP -> Icons.Filled.Public
+                                RadarTab.IDENTITY_GRAPH -> Icons.Default.Fingerprint
+                                RadarTab.INTELLIGENCE_DASHBOARD -> Icons.Default.Hub
                                 RadarTab.MAGNETOMETER_EMF -> Icons.Default.Equalizer
                                 RadarTab.SECURITY_GUARD -> Icons.Default.Security
                                 RadarTab.CSV_LOG_CONSOLE -> Icons.Default.Terminal
                                 RadarTab.SETTINGS -> Icons.Default.Settings
+                                RadarTab.EVENT_RECORDER -> Icons.Default.Info
+                                RadarTab.ADAPTIVE_LOCALIZATION -> Icons.Default.MyLocation
                             },
                             contentDescription = tab.name,
                             tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
@@ -3080,6 +4139,7 @@ fun BottomRadarNavBar(
                         )
                         Text(
                             text = when (tab) {
+                                RadarTab.SIMULATION_LAB -> "Lab"
                                 RadarTab.SWEEP_RADAR -> "Sweep"
                                 RadarTab.FULL_RADAR -> "Full Radar"
                                 RadarTab.AI_THREAT_ANALYSIS -> "AI Intel"
@@ -3087,10 +4147,15 @@ fun BottomRadarNavBar(
                                 RadarTab.SPECTRUM_ANALYZER -> "Spectrum"
                                 RadarTab.DETECTED_SENSORS -> "Sensors"
                                 RadarTab.HISTORIC_HEATMAP -> "Heatmap"
+                                RadarTab.ENVIRONMENT_MAP -> "RF Map"
+                                RadarTab.IDENTITY_GRAPH -> "Identity"
+                                RadarTab.INTELLIGENCE_DASHBOARD -> "Intelligence"
                                 RadarTab.MAGNETOMETER_EMF -> "Magneto"
                                 RadarTab.SECURITY_GUARD -> "Guard"
                                 RadarTab.CSV_LOG_CONSOLE -> "Log"
                                 RadarTab.SETTINGS -> "Settings"
+                                RadarTab.EVENT_RECORDER -> "Rec"
+                                RadarTab.ADAPTIVE_LOCALIZATION -> "Localizer"
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -3105,7 +4170,6 @@ fun BottomRadarNavBar(
         }
     }
 }
-
 @Composable
 fun DetectedSensorsScreen(
     uiState: SignalRadarUiState,
@@ -3439,7 +4503,7 @@ fun DetectedSensorsScreen(
                                     color = Color(0xFFFFCC00)
                                 )
                                 Text(
-                                    text = "X: %.1f | Y: %.1f | Z: %.1f m/s²".format(sensor.accelX, sensor.accelY, sensor.accelZ),
+                                    text = "X: %.1f | Y: %.1f | Z: %.1f ft/s²".format(sensor.accelX, sensor.accelY, sensor.accelZ),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace
@@ -3561,7 +4625,7 @@ fun DetectedSensorsScreen(
                                     color = Color(0xFFFF8800)
                                 )
                                 Text(
-                                    text = "Altitude: ${sensor.estimatedAltitudeMeters.toInt()} meters ASL",
+                                    text = "Altitude: ${sensor.estimatedAltitudeMeters.toInt()} feet ASL",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace
@@ -3744,7 +4808,7 @@ fun DetectedSensorsScreen(
                                     color = Color(0xFFFFCC00)
                                 )
                                 Text(
-                                    text = "Gz: %.1f m/s² Vertical".format(sensor.gravityZ),
+                                    text = "Gz: %.1f ft/s² Vertical".format(sensor.gravityZ),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace
@@ -3805,7 +4869,7 @@ fun DetectedSensorsScreen(
                                     color = Color(0xFF00FF66)
                                 )
                                 Text(
-                                    text = "Lz: %.1f m/s² Impulse".format(sensor.linearAccelZ),
+                                    text = "Lz: %.1f ft/s² Impulse".format(sensor.linearAccelZ),
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontSize = 9.sp,
                                         fontFamily = FontFamily.Monospace
@@ -4343,7 +5407,6 @@ private fun SensorHardwareDiagramCanvas(diagramType: String) {
         }
     }
 }
-
 @Composable
 fun HistoricHeatmapScreen(uiState: SignalRadarUiState) {
     var filterType by remember { mutableStateOf("ALL") }
@@ -4534,7 +5597,7 @@ fun HistoricHeatmapScreen(uiState: SignalRadarUiState) {
 
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = "%.1fm".format(item.distanceMeters),
+                                text = "%.1f ft".format((item.distanceMeters * 3.28084f)),
                                 style = MaterialTheme.typography.labelMedium.copy(
                                     fontWeight = FontWeight.Black,
                                     fontFamily = FontFamily.Monospace
@@ -4563,7 +5626,6 @@ fun HistoricHeatmapScreen(uiState: SignalRadarUiState) {
         }
     }
 }
-
 @Composable
 fun SpatialD3HeatmapComponent(
     blips: List<RadarBlip>,
@@ -4721,7 +5783,7 @@ fun SpatialD3HeatmapComponent(
                     color = Color.Yellow
                 )
                 Text(
-                    text = "Grid Range: ±20 Meters",
+                    text = "Grid Range: ±20 Feet",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -4892,6 +5954,7 @@ fun rememberFilteredBlips(
         list = when (sortBy.uppercase()) {
             "RSSI" -> list.sortedWith(
                 compareByDescending<RadarBlip> { it.id == selectedTargetId }
+                    .thenByDescending { it.rssi / 5 * 5 } // Bucket by 5 dBm to stabilize list layout (Goal 2)
                     .thenByDescending { it.rssi }
                     .thenBy { it.distance }
             )
@@ -4902,6 +5965,7 @@ fun rememberFilteredBlips(
             )
             else -> list.sortedWith(
                 compareByDescending<RadarBlip> { it.id == selectedTargetId }
+                    .thenBy { (it.distance * 10f).toInt() / 5 } // Bucket distance by 50cm to prevent rapid jitter (Goal 2)
                     .thenBy { it.distance }
                     .thenByDescending { it.rssi }
             )
@@ -5338,7 +6402,7 @@ fun ProximityRangeGauge(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "BREACH <%.1fm".format(breachMeters),
+                text = "BREACH <%.1f ft".format(breachMeters),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
@@ -5347,7 +6411,7 @@ fun ProximityRangeGauge(
                 color = Color(0xFFFF3366)
             )
             Text(
-                text = "WARNING <%.1fm".format(warningMeters),
+                text = "WARNING <%.1f ft".format(warningMeters),
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
@@ -5368,1053 +6432,6 @@ fun ProximityRangeGauge(
     }
 }
 
-@Composable
-fun SettingsScreen(
-    uiState: SignalRadarUiState,
-    onSetScanMode: (ScanMode) -> Unit,
-    onSetRssiThreshold: (Int) -> Unit,
-    onToggleRssiAlert: () -> Unit,
-    onSetPerimeterThreshold: (Float) -> Unit,
-    onSetWarningZoneThreshold: (Float) -> Unit,
-    onSetPerimeterSensitivityPreset: (PerimeterSensitivityPreset) -> Unit,
-    onSetHapticPulseFrequency: (Long) -> Unit,
-    onAdjustPerimeterThreshold: (Float) -> Unit,
-    onAdjustWarningZoneThreshold: (Float) -> Unit,
-    onSetEmfThreshold: (Float) -> Unit,
-    onSetAcousticThreshold: (Int) -> Unit,
-    onToggleStealthMode: () -> Unit,
-    onTogglePerimeterAlarm: () -> Unit,
-    onToggleAudioSonar: () -> Unit,
-    onToggleBleScannerService: () -> Unit,
-    onToggleBackgroundAlertService: (Boolean) -> Unit = {},
-    onToggleHapticAlerts: (Boolean) -> Unit = {},
-    onToggleVisualNotifs: (Boolean) -> Unit = {},
-    onResetDefaults: () -> Unit
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .testTag("settings_screen"),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Banner Header
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings Icon",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "RADAR CONFIGURATION",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.sp
-                            ),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Define custom distance thresholds, fine-tune proximity alert sensitivity, and manage scanning cutoffs.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 1: PROXIMITY ALERTS & MICRO-PERIMETER TRACKING SENSITIVITY
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("proximity_alert_settings_card"),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = "Proximity Sensitivity",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Text(
-                                text = "MICRO-PERIMETER SENSITIVITY",
-                                style = MaterialTheme.typography.labelLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace,
-                                    letterSpacing = 1.sp
-                                ),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Preset sensitivity profiles configure dual-layer inner breach and outer warning boundaries.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    // Preset Chips Flow / Grid
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Sensitivity Preset Profile:",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            PerimeterSensitivityPreset.entries.forEach { preset ->
-                                val isSelected = uiState.perimeterSensitivityPreset == preset
-                                Surface(
-                                    shape = RoundedCornerShape(20.dp),
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    ),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable { onSetPerimeterSensitivityPreset(preset) }
-                                        .testTag("preset_chip_${preset.name.lowercase()}")
-                                ) {
-                                    Text(
-                                        text = preset.title.split(" ").first(),
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        ),
-                                        color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-
-                        // Selected Preset Description
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-                        ) {
-                            Text(
-                                text = uiState.perimeterSensitivityPreset.description,
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                    }
-
-                    // Interactive Proximity Range Visualizer Canvas
-                    ProximityRangeGauge(
-                        breachMeters = uiState.perimeterThresholdMeters,
-                        warningMeters = uiState.warningZoneThresholdMeters,
-                        maxGaugeMeters = maxOf(35f, uiState.warningZoneThresholdMeters * 1.2f),
-                        activeBlips = uiState.activeBlips
-                    )
-
-                    // Inner Perimeter Breach Threshold
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Shield,
-                                    contentDescription = "Breach Threshold",
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Inner Breach Alarm Threshold:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-                            ) {
-                                Text(
-                                    text = "%.1f m".format(uiState.perimeterThresholdMeters),
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        Slider(
-                            value = uiState.perimeterThresholdMeters,
-                            onValueChange = { onSetPerimeterThreshold(it) },
-                            valueRange = 0.5f..20.0f,
-                            steps = 39,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.error,
-                                activeTrackColor = MaterialTheme.colorScheme.error,
-                                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            modifier = Modifier.testTag("perimeter_threshold_slider")
-                        )
-
-                        // Fine Adjustment Buttons for Breach Threshold
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Fine Tuning:",
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Color.Gray
-                            )
-                            OutlinedButton(
-                                onClick = { onAdjustPerimeterThreshold(-0.5f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("perimeter_adj_minus_large")
-                            ) {
-                                Text("-0.5m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustPerimeterThreshold(-0.1f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("perimeter_adj_minus_small")
-                            ) {
-                                Text("-0.1m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustPerimeterThreshold(0.1f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("perimeter_adj_plus_small")
-                            ) {
-                                Text("+0.1m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustPerimeterThreshold(0.5f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("perimeter_adj_plus_large")
-                            ) {
-                                Text("+0.5m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-
-                    // Outer Warning Zone Threshold
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Sensors,
-                                    contentDescription = "Warning Halo Threshold",
-                                    tint = Color(0xFFFFCC00),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Outer Warning Halo Threshold:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFFFFCC00).copy(alpha = 0.2f)
-                            ) {
-                                Text(
-                                    text = "%.1f m".format(uiState.warningZoneThresholdMeters),
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.Monospace
-                                    ),
-                                    color = Color(0xFFFFCC00),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        Slider(
-                            value = uiState.warningZoneThresholdMeters,
-                            onValueChange = { onSetWarningZoneThreshold(it) },
-                            valueRange = 1.0f..50.0f,
-                            steps = 49,
-                            colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFFFFCC00),
-                                activeTrackColor = Color(0xFFFFCC00),
-                                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            modifier = Modifier.testTag("warning_zone_threshold_slider")
-                        )
-
-                        // Fine Adjustment Buttons for Warning Threshold
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Fine Tuning:",
-                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Color.Gray
-                            )
-                            OutlinedButton(
-                                onClick = { onAdjustWarningZoneThreshold(-1.0f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("warning_adj_minus_large")
-                            ) {
-                                Text("-1.0m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustWarningZoneThreshold(-0.2f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("warning_adj_minus_small")
-                            ) {
-                                Text("-0.2m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustWarningZoneThreshold(0.2f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("warning_adj_plus_small")
-                            ) {
-                                Text("+0.2m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                            OutlinedButton(
-                                onClick = { onAdjustWarningZoneThreshold(1.0f) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                modifier = Modifier.testTag("warning_adj_plus_large")
-                            ) {
-                                Text("+1.0m", style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace))
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-
-                    // Haptic Vibration Pulse Cadence
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Vibration,
-                                    contentDescription = "Haptic Pulse Cadence",
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Proximity Haptic Cadence:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Text(
-                                text = if (uiState.hapticPulseFrequencyMs > 0) "${uiState.hapticPulseFrequencyMs}ms" else "MUTE",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(
-                                250L to "Rapid",
-                                500L to "Tactical",
-                                750L to "Standard",
-                                1000L to "Slow",
-                                0L to "Mute"
-                            ).forEach { (pulseMs, label) ->
-                                val isSelected = uiState.hapticPulseFrequencyMs == pulseMs
-                                OutlinedButton(
-                                    onClick = { onSetHapticPulseFrequency(pulseMs) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent
-                                    ),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                    modifier = Modifier.testTag("haptic_cadence_$pulseMs")
-                                ) {
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontSize = 10.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        ),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section 2: SCANNING MODES TOGGLE
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "ANTENNA SCANNING MODES",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.sp
-                    ),
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                ScanMode.entries.forEach { mode ->
-                    val isSelected = uiState.scanMode == mode
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { onSetScanMode(mode) }
-                            .testTag("scan_mode_card_${mode.name.lowercase()}"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected)
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = BorderStroke(
-                            width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-                                        else MaterialTheme.colorScheme.surface,
-                                        CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = when (mode) {
-                                        ScanMode.TACTICAL_FULL -> Icons.Default.Radar
-                                        ScanMode.STEALTH_PASSIVE -> Icons.Default.VolumeOff
-                                        ScanMode.HIGH_SENSITIVITY -> Icons.Default.Speed
-                                        ScanMode.POWER_SAVER -> Icons.Default.Sensors
-                                    },
-                                    contentDescription = mode.title,
-                                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = mode.title,
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        ),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surface,
-                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                                    ) {
-                                        Text(
-                                            text = "${mode.delayMs}ms",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 9.sp,
-                                                fontFamily = FontFamily.Monospace
-                                            ),
-                                            color = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = mode.subtitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Icon(
-                                imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.Tune,
-                                contentDescription = if (isSelected) "Selected" else "Select",
-                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section 3: SIGNAL STRENGTH & SENSOR CUTOFFS
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = "SIGNAL STRENGTH & SENSOR CUTOFFS",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp
-                        ),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    // RSSI Threshold Slider
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Speed,
-                                    contentDescription = "RSSI",
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "RSSI Alert Cutoff:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Text(
-                                text = "${uiState.rssiAlertThresholdDbm} dBm",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        Text(
-                            text = when {
-                                uiState.rssiAlertThresholdDbm >= -60 -> "High Strength Cutoff (Only very close / strong devices trigger alert)"
-                                uiState.rssiAlertThresholdDbm >= -75 -> "Moderate Cutoff (Standard operational proximity alert)"
-                                else -> "High Sensitivity Cutoff (Faint & distant signals trigger alert)"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Slider(
-                            value = uiState.rssiAlertThresholdDbm.toFloat(),
-                            onValueChange = { onSetRssiThreshold(it.toInt()) },
-                            valueRange = -95f..-40f,
-                            steps = 55,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = MaterialTheme.colorScheme.surface
-                            ),
-                            modifier = Modifier.testTag("rssi_threshold_slider")
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Enable RSSI Signal Threshold Alert",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Switch(
-                                checked = uiState.isRssiAlertEnabled,
-                                onCheckedChange = { onToggleRssiAlert() },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                ),
-                                modifier = Modifier.testTag("rssi_alert_switch")
-                            )
-                        }
-
-                        HorizontalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                            thickness = 1.dp
-                        )
-
-                        // Background Service & Haptic / Notification Triggers
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "BACKGROUND ALERT SERVICE",
-                                        style = MaterialTheme.typography.titleSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        ),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Text(
-                                        text = "Continuously checks scanned devices in background against signal cutoff threshold (${uiState.rssiAlertThresholdDbm} dBm)",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Switch(
-                                    checked = uiState.isBackgroundAlertServiceActive,
-                                    onCheckedChange = { onToggleBackgroundAlertService(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                    ),
-                                    modifier = Modifier.testTag("bg_alert_service_switch")
-                                )
-                            }
-
-                            // Haptic Feedback Trigger Toggle
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Vibration,
-                                        contentDescription = "Haptics",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Haptic Feedback Pulse Alert",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Switch(
-                                    checked = uiState.isHapticAlertsEnabled,
-                                    onCheckedChange = { onToggleHapticAlerts(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                    ),
-                                    modifier = Modifier.testTag("haptic_alerts_switch")
-                                )
-                            }
-
-                            // Visual System Notification Toggle
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Sensors,
-                                        contentDescription = "Notifications",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Visual System Notifications",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                                Switch(
-                                    checked = uiState.isVisualNotifsEnabled,
-                                    onCheckedChange = { onToggleVisualNotifs(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
-                                    ),
-                                    modifier = Modifier.testTag("visual_notifs_switch")
-                                )
-                            }
-                        }
-                    }
-
-                    // EMF Magnetic Flux Alert Cutoff
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Equalizer,
-                                    contentDescription = "EMF",
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "EMF Flux Anomaly Cutoff:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Text(
-                                text = "%.0f µT".format(uiState.emfAlertThresholdMicroTesla),
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        Slider(
-                            value = uiState.emfAlertThresholdMicroTesla,
-                            onValueChange = { onSetEmfThreshold(it) },
-                            valueRange = 10.0f..200.0f,
-                            steps = 38,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = MaterialTheme.colorScheme.surface
-                            ),
-                            modifier = Modifier.testTag("emf_threshold_slider")
-                        )
-                    }
-
-                    // Acoustic Microphone Threshold Cutoff
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Acoustic",
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Acoustic Noise Cutoff:",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Text(
-                                text = "${uiState.acousticAlertThresholdDb} dB",
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Black,
-                                    fontFamily = FontFamily.Monospace
-                                ),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-
-                        Slider(
-                            value = uiState.acousticAlertThresholdDb.toFloat(),
-                            onValueChange = { onSetAcousticThreshold(it.toInt()) },
-                            valueRange = -80f..-10f,
-                            steps = 70,
-                            colors = SliderDefaults.colors(
-                                thumbColor = MaterialTheme.colorScheme.primary,
-                                activeTrackColor = MaterialTheme.colorScheme.primary,
-                                inactiveTrackColor = MaterialTheme.colorScheme.surface
-                            ),
-                            modifier = Modifier.testTag("acoustic_threshold_slider")
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 4: HARDWARE & SENSOR TOGGLES
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "TACTICAL HARDWARE TOGGLES",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 1.sp
-                        ),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    // Stealth Mode Switch
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Stealth Silent Mode",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Mutes audio sonar echos and audible alarms.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.stealthModeEnabled,
-                            onCheckedChange = { onToggleStealthMode() },
-                            modifier = Modifier.testTag("stealth_mode_switch")
-                        )
-                    }
-
-                    // Security Guard Proximity Alarm
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Security Guard Alarm & Haptics",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Vibrates and alerts when perimeter boundary is breached.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.isPerimeterAlarmEnabled,
-                            onCheckedChange = { onTogglePerimeterAlarm() },
-                            modifier = Modifier.testTag("perimeter_alarm_switch")
-                        )
-                    }
-
-                    // Audio Sonar Echo Ping
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Audio Sonar Echo Ping",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Plays pitch-modulated audio feedback as targets approach.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.isAudioSonarActive,
-                            onCheckedChange = { onToggleAudioSonar() },
-                            enabled = !uiState.stealthModeEnabled,
-                            modifier = Modifier.testTag("audio_sonar_switch")
-                        )
-                    }
-
-                    // BLE Scanner Service Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "BLE Scanner Service Engine",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Background Bluetooth Low Energy device discovery & Room DB logging.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = uiState.isBleScannerServiceActive,
-                            onCheckedChange = { onToggleBleScannerService() },
-                            modifier = Modifier.testTag("ble_service_switch")
-                        )
-                    }
-                }
-            }
-        }
-
-        // Section 5: RESET DEFAULTS
-        item {
-            OutlinedButton(
-                onClick = onResetDefaults,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("reset_settings_button"),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.primary
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.RestartAlt,
-                    contentDescription = "Reset Defaults",
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "RESET SETTINGS TO FACTORY DEFAULTS",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                )
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // 3D HARDWARE IDENTIFICATION DOCUMENTATION OVERLAY
@@ -6443,7 +6460,7 @@ private fun getHardwareCatalogueData(): List<HardwareCatalogueItem> {
             category = "WI-FI",
             frequencyRange = "2.4 GHz, 5 GHz, 6 GHz UNII-1 to 8",
             antennaGain = "6.5 dBi Multi-beam MIMO",
-            maxRangeMeters = "35 - 100 meters",
+            maxRangeMeters = "35 - 100 feet",
             threatLevel = "NETWORK INFRASTRUCTURE",
             threatColor = Color(0xFF00E5FF),
             description = "High-speed enterprise wireless router broadcasting 802.11be/ax beacons with multi-link operation (MLO).",
@@ -6457,7 +6474,7 @@ private fun getHardwareCatalogueData(): List<HardwareCatalogueItem> {
             category = "BLE BEACON",
             frequencyRange = "2402 MHz - 2480 MHz (Bluetooth LE)",
             antennaGain = "1.2 dBi Integrated PCB Trace Antenna",
-            maxRangeMeters = "10 - 30 meters",
+            maxRangeMeters = "10 - 30 feet",
             threatLevel = "PRIVACY & LOCATION TRACKING RISK",
             threatColor = Color(0xFFFF9800),
             description = "Compact coin-cell location tracking beacon periodically advertising encrypted payload bursts to nearby devices.",
@@ -6471,7 +6488,7 @@ private fun getHardwareCatalogueData(): List<HardwareCatalogueItem> {
             category = "CELL TOWER",
             frequencyRange = "600 MHz - 3.8 GHz (Sub-6) & 28 GHz (mmWave)",
             antennaGain = "18.0 dBi Beamforming Phased Array",
-            maxRangeMeters = "1,500 - 10,000 meters",
+            maxRangeMeters = "1,500 - 10,000 feet",
             threatLevel = "MACRO TELECOM CELLULAR TOWER",
             threatColor = Color(0xFF00FF66),
             description = "High-power cellular base station equipped with tri-sector panel antennas and beamforming massive MIMO units.",
@@ -6499,7 +6516,7 @@ private fun getHardwareCatalogueData(): List<HardwareCatalogueItem> {
             category = "EMF & OTHER",
             frequencyRange = "50 Hz / 60 Hz AC Fundamental + Harmonics",
             antennaGain = "Near-Field Magnetic Flux Coupling",
-            maxRangeMeters = "0.05 - 1.5 meters",
+            maxRangeMeters = "0.05 - 1.5 feet",
             threatLevel = "ELECTROMAGNETIC FIELD ANOMALY",
             threatColor = Color(0xFFFF3366),
             description = "Heavy power grid transformer, wall adapter power supply, or electric motor generating strong AC magnetic field vectors.",
@@ -6513,7 +6530,7 @@ private fun getHardwareCatalogueData(): List<HardwareCatalogueItem> {
             category = "EMF & OTHER",
             frequencyRange = "18.0 kHz - 22.5 kHz Near-Ultrasonic",
             antennaGain = "Directional Piezoelectric Horn",
-            maxRangeMeters = "3 - 12 meters",
+            maxRangeMeters = "3 - 12 feet",
             threatLevel = "INAUDIBLE AUDIO BEACON SURVEILLANCE",
             threatColor = Color(0xFFFFCC00),
             description = "Hidden acoustic transmitter emitting inaudible high-frequency audio tones for cross-device activity tracking.",
@@ -6659,7 +6676,6 @@ fun HardwareDocumentationOverlayDialog(
         }
     }
 }
-
 @Composable
 private fun Hardware3DItemCard(item: HardwareCatalogueItem) {
     Card(
@@ -6829,7 +6845,6 @@ private fun Hardware3DItemCard(item: HardwareCatalogueItem) {
         }
     }
 }
-
 @Composable
 private fun Isometric3DCanvasView(visualType: String) {
     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -7085,6 +7100,79 @@ private fun Isometric3DCanvasView(visualType: String) {
                     )
                 }
             }
+        }
+    }
+}
+@Composable
+fun EnvironmentalBaselineCard(
+    summary: BaselineSummary,
+    onToggleLearning: () -> Unit,
+    onResetBaseline: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "ENVIRONMENT BASELINE",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                // Controls
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (summary.isLearning) Color(0xFF00FF66).copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, if (summary.isLearning) Color(0xFF00FF66) else MaterialTheme.colorScheme.outline),
+                        modifier = Modifier.clickable { onToggleLearning() }
+                    ) {
+                        Text(
+                            text = if (summary.isLearning) "LEARNING ACTIVE" else "PAUSED",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+                            color = if (summary.isLearning) Color(0xFF00FF66) else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        modifier = Modifier.clickable { onResetBaseline() }
+                    ) {
+                        Text(
+                            text = "RESET",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(text = "Known Fingerprints: ${summary.knownFingerprints}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    Text(text = "New Fingerprints: ${summary.newFingerprints}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    Text(text = "Missing Fingerprints: ${summary.missingFingerprints}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.End) {
+                    val actSign = if (summary.rfActivityDeltaPercent >= 0) "+" else ""
+                    val freqSign = if (summary.freqOccupancyDeltaPercent >= 0) "+" else ""
+                    Text(text = "RF Activity: $actSign${String.format("%.1f", summary.rfActivityDeltaPercent * 100)}%", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    Text(text = "Frequency Occupancy: $freqSign${String.format("%.1f", summary.freqOccupancyDeltaPercent * 100)}%", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                    Text(text = "Baseline Confidence: ${String.format("%.2f", summary.baselineConfidence)}", style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+                }
+            }
+            
+            Text(
+                text = "Age: ${summary.baselineAgeMs / 1000 / 60} min | Data Points: ${summary.observationsCollected}",
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, color = Color.Gray)
+            )
         }
     }
 }

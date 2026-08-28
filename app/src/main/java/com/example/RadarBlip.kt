@@ -16,5 +16,16 @@ data class RadarBlip(
     val isHighRiskVendor: Boolean = false,
     val isChannelSoundingCapable: Boolean = false,
     val csEstimatedAccuracyMeters: Float = 1.0f,
-    val csRangingMethod: String = "RSSI"
+    val csRangingMethod: String = "RSSI",
+    val provenance: DataProvenance = DataProvenance.UNKNOWN,
+    val localizationConfidence: LocalizationConfidence = LocalizationConfidence.NONE,
+    val fingerprintId: String? = null,
+    val fingerprintConfidence: Float? = null,
+    val bandwidthMhz: Double? = null,
+    val pulseDurationMs: Double? = null,
+    val baselineState: BaselineState = BaselineState.UNKNOWN,
+    val pulseRepetitionIntervalMs: Double? = null,
+    val anomalyResult: AnomalyResult? = null,
+    val payloadBytes: ByteArray? = null,
+    val timestampMs: Long = System.currentTimeMillis()
 )

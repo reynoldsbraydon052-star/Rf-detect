@@ -46,6 +46,7 @@ abstract class OuiDatabase : RoomDatabase() {
                 CoroutineScope(Dispatchers.IO).launch {
                     val dao = instance.ouiDao()
                     dao.insertAll(listOf(
+                        OuiEntity("00:08:E2", "Cisco Systems", false),
                         OuiEntity("24:0A:C4", "Espressif Systems", true),
                         OuiEntity("A4:C1:38", "Espressif Systems", true),
                         OuiEntity("00:1A:E8", "Hangzhou Hikvision", true),

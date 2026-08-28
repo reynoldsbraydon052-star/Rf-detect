@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -26,8 +27,23 @@ class SettingsDataStore(private val context: Context) {
         val KEY_RADAR_GRID_MODE = androidx.datastore.preferences.core.stringPreferencesKey("radar_grid_mode")
         val KEY_RADAR_GRID_OPACITY = androidx.datastore.preferences.core.floatPreferencesKey("radar_grid_opacity")
         val KEY_SHOW_COVERAGE_ZONES = booleanPreferencesKey("show_coverage_zones")
+        val KEY_BASELINE_LEARNING_MODE = booleanPreferencesKey("baseline_learning_mode")
+        val KEY_BASELINE_STARTED_AT_MS = longPreferencesKey("baseline_started_at_ms")
+        val KEY_BASELINE_OBSERVATIONS = longPreferencesKey("baseline_observations")
+        val KEY_BASELINE_AVG_ACTIVE_BLIPS = androidx.datastore.preferences.core.floatPreferencesKey("baseline_avg_active_blips")
+        val KEY_BASELINE_AVG_FREQ_OCCUPANCY = androidx.datastore.preferences.core.floatPreferencesKey("baseline_avg_freq_occupancy")
+        val KEY_AI_INFERENCE_MODE = androidx.datastore.preferences.core.stringPreferencesKey("ai_inference_mode")
 
         val DEFAULT_CATEGORIES = setOf("MOBILE", "AUDIO_WEAR", "IOT", "WIFI_AP", "BEACONS", "CELLULAR", "ACOUSTIC_EMF")
+    }
+
+    val aiInferenceMode: Flow<AiInferenceMode> = context.dataStore.data.map { preferences ->
+        val modeStr = preferences[KEY_AI_INFERENCE_MODE] ?: AiInferenceMode.GEMINI_CLOUD.name
+        try {
+            AiInferenceMode.valueOf(modeStr)
+        } catch (e: Exception) {
+            AiInferenceMode.GEMINI_CLOUD
+        }
     }
 
     val radarGridModeStr: Flow<String> = context.dataStore.data.map { preferences ->
@@ -40,6 +56,21 @@ class SettingsDataStore(private val context: Context) {
 
     val showCoverageZones: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[KEY_SHOW_COVERAGE_ZONES] ?: true
+    }
+    val isBaselineLearningMode: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_BASELINE_LEARNING_MODE] ?: false
+    }
+    val baselineStartedAtMs: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[KEY_BASELINE_STARTED_AT_MS] ?: 0L
+    }
+    val baselineObservations: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[KEY_BASELINE_OBSERVATIONS] ?: 0L
+    }
+    val baselineAvgActiveBlips: Flow<Float> = context.dataStore.data.map { preferences ->
+        preferences[KEY_BASELINE_AVG_ACTIVE_BLIPS] ?: 0f
+    }
+    val baselineAvgFreqOccupancy: Flow<Float> = context.dataStore.data.map { preferences ->
+        preferences[KEY_BASELINE_AVG_FREQ_OCCUPANCY] ?: 0f
     }
 
     val defaultRangeMeters: Flow<Int> = context.dataStore.data.map { preferences ->
@@ -137,6 +168,38 @@ class SettingsDataStore(private val context: Context) {
     suspend fun updateShowCoverageZones(show: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[KEY_SHOW_COVERAGE_ZONES] = show
+        }
+    }
+
+    suspend fun updateBaselineLearningMode(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BASELINE_LEARNING_MODE] = enabled
+            if (enabled && (preferences[KEY_BASELINE_STARTED_AT_MS] ?: 0L) == 0L) {
+                preferences[KEY_BASELINE_STARTED_AT_MS] = System.currentTimeMillis()
+            }
+        }
+    }
+    
+    suspend fun resetBaseline() {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BASELINE_STARTED_AT_MS] = 0L
+            preferences[KEY_BASELINE_OBSERVATIONS] = 0L
+            preferences[KEY_BASELINE_AVG_ACTIVE_BLIPS] = 0f
+            preferences[KEY_BASELINE_AVG_FREQ_OCCUPANCY] = 0f
+        }
+    }
+    
+    suspend fun updateBaselineStats(observations: Long, avgBlips: Float, avgFreq: Float) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_BASELINE_OBSERVATIONS] = observations
+            preferences[KEY_BASELINE_AVG_ACTIVE_BLIPS] = avgBlips
+            preferences[KEY_BASELINE_AVG_FREQ_OCCUPANCY] = avgFreq
+        }
+    }
+
+    suspend fun updateAiInferenceMode(mode: AiInferenceMode) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_AI_INFERENCE_MODE] = mode.name
         }
     }
 

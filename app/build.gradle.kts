@@ -13,6 +13,8 @@ android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
+  ndkVersion = "26.1.10909125"
+
   defaultConfig {
     applicationId = "com.aistudio.statsdashboard.qvzkr"
     minSdk = 24
@@ -21,6 +23,15 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    ndk {
+      abiFilters.add("arm64-v8a")
+    }
+  }
+
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+    }
   }
 
   signingConfigs {

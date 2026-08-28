@@ -603,30 +603,30 @@ private fun getRechartsRfHtml(): String {
   function getColorForIntensity(norm, pal) {
     norm = Math.max(0, Math.min(1, norm));
     if (pal === 'MATRIX') {
-      return `rgb(0, ${Math.floor(norm * 255)}, ${Math.floor(norm * 80)})`;
+      return `rgb(0, ${'$'}{Math.floor(norm * 255)}, ${'$'}{Math.floor(norm * 80)})`;
     } else if (pal === 'CYBER') {
       const r = Math.floor(norm * 40);
       const g = Math.floor(norm * 230);
       const b = Math.floor(100 + norm * 155);
-      return `rgb(${r}, ${g}, ${b})`;
+      return `rgb(${'$'}{r}, ${'$'}{g}, ${'$'}{b})`;
     } else if (pal === 'PLASMA') {
       const r = Math.floor(norm * 255);
       const g = Math.floor((1 - norm) * 40 + norm * 80);
       const b = Math.floor((1 - norm) * 180 + norm * 240);
-      return `rgb(${r}, ${g}, ${b})`;
+      return `rgb(${'$'}{r}, ${'$'}{g}, ${'$'}{b})`;
     } else {
       // THERMAL
       if (norm < 0.25) {
-        return `rgb(0, ${Math.floor(norm * 4 * 200)}, 255)`;
+        return `rgb(0, ${'$'}{Math.floor(norm * 4 * 200)}, 255)`;
       } else if (norm < 0.5) {
         const t = (norm - 0.25) * 4;
-        return `rgb(0, 255, ${Math.floor((1 - t) * 255)})`;
+        return `rgb(0, 255, ${'$'}{Math.floor((1 - t) * 255)})`;
       } else if (norm < 0.75) {
         const t = (norm - 0.5) * 4;
-        return `rgb(${Math.floor(t * 255)}, 255, 0)`;
+        return `rgb(${'$'}{Math.floor(t * 255)}, 255, 0)`;
       } else {
         const t = (norm - 0.75) * 4;
-        return `rgb(255, ${Math.floor((1 - t) * 200)}, 0)`;
+        return `rgb(255, ${'$'}{Math.floor((1 - t) * 200)}, 0)`;
       }
     }
   }
@@ -692,7 +692,7 @@ private fun getRechartsRfHtml(): String {
 
       ctx.fillStyle = '#00FF66';
       ctx.font = '9px monospace';
-      ctx.fillText(`${dbm}`, 6, y + 3);
+      ctx.fillText(`${'$'}{dbm}`, 6, y + 3);
     }
     ctx.setLineDash([]);
 
@@ -771,7 +771,7 @@ private fun getRechartsRfHtml(): String {
     ctx.arc(lastPt.x, lastPt.y, 8, 0, Math.PI * 2);
     ctx.stroke();
 
-    hud.innerText = `RSSI: ${lastPt.rssi} dBm • WAVE 60FPS`;
+    hud.innerText = `RSSI: ${'$'}{lastPt.rssi} dBm • WAVE 60FPS`;
   }
 
   function renderWaterfallSpectrogram(pad, gw, gh) {
@@ -801,7 +801,7 @@ private fun getRechartsRfHtml(): String {
     ctx.fillText('5.0G', pad.left + gw * 0.75, pad.top + gh + 14);
     ctx.fillText('6.5G UWB', pad.left + gw - 38, pad.top + gh + 14);
 
-    hud.innerText = `WATERFALL • ${colormap} HEATMAP`;
+    hud.innerText = `WATERFALL • ${'$'}{colormap} HEATMAP`;
   }
 
   function renderFftSpectrum(pad, gw, gh) {

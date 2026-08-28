@@ -34,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -72,6 +74,38 @@ data class ArTargetProjection(
     val estimatedElevationMeters: Float,
     val verticalAngleDegrees: Float
 )
+
+sealed class ArObjectDetails {
+    data class Source(
+        val blip: RadarBlip,
+        val distance: Float,
+        val bearing: Float,
+        val confidence: Float,
+        val fingerprint: String
+    ) : ArObjectDetails()
+
+    data class Measurement(
+        val rssi: Int,
+        val quality: Int,
+        val x: Float,
+        val y: Float,
+        val z: Float,
+        val timestamp: Long
+    ) : ArObjectDetails()
+
+    data class Uncertainty(
+        val valueMeters: Float,
+        val confidence: Float,
+        val supportingCount: Int,
+        val contradictoryCount: Int
+    ) : ArObjectDetails()
+
+    data class GuidanceDetails(
+        val moveDirection: Float,
+        val expectedGain: Int,
+        val rationale: String
+    ) : ArObjectDetails()
+}
 
 object UwbArTracker {
     fun estimateTargetElevation(blip: RadarBlip): Float {
@@ -148,499 +182,6 @@ object UwbArTracker {
             estimatedElevationMeters = elevationMeters,
             verticalAngleDegrees = targetVerticalAngleDeg
         )
-    }
-}
-
-@Composable
-fun UwbArCameraScreen(
-    uiState: SignalRadarUiState,
-    mapRangeMeters: Float,
-    onSelectTargetDevice: (String?) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.CAMERA
-            ) == PackageManager.PERMISSION_GRANTED
-        )
-    }
-
-    var currentRotationDegrees by remember { mutableIntStateOf(0) }
-    var currentSurfaceRotation by remember { mutableIntStateOf(Surface.ROTATION_0) }
-    var previewUseCase by remember { mutableStateOf<Preview?>(null) }
-    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
-
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasCameraPermission = granted
-    }
-
-    LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            launcher.launch(Manifest.permission.CAMERA)
-        }
-    }
-
-    DisposableEffect(context, lifecycleOwner) {
-        val orientationEventListener = object : OrientationEventListener(context) {
-            override fun onOrientationChanged(orientation: Int) {
-                if (orientation == OrientationEventListener.ORIENTATION_UNKNOWN) return
-                val newRotation = when (orientation) {
-                    in 45..134 -> Surface.ROTATION_270
-                    in 135..224 -> Surface.ROTATION_180
-                    in 225..314 -> Surface.ROTATION_90
-                    else -> Surface.ROTATION_0
-                }
-                if (currentSurfaceRotation != newRotation) {
-                    currentSurfaceRotation = newRotation
-                    currentRotationDegrees = when (newRotation) {
-                        Surface.ROTATION_90 -> 90
-                        Surface.ROTATION_180 -> 180
-                        Surface.ROTATION_270 -> 270
-                        else -> 0
-                    }
-                    try {
-                        previewUseCase?.targetRotation = newRotation
-                    } catch (e: Exception) {
-                        android.util.Log.e("UwbArCameraScreen", "Failed setting preview rotation", e)
-                    }
-                }
-            }
-        }
-        if (orientationEventListener.canDetectOrientation()) {
-            orientationEventListener.enable()
-        }
-
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                try {
-                    cameraProviderRef?.unbindAll()
-                } catch (e: Exception) {
-                    android.util.Log.e("UwbArCameraScreen", "Error unbinding camera on pause", e)
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-
-        onDispose {
-            orientationEventListener.disable()
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            try {
-                cameraProviderRef?.unbindAll()
-            } catch (e: Exception) {
-                android.util.Log.e("UwbArCameraScreen", "Error unbinding camera on dispose", e)
-            }
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .testTag("uwb_ar_camera_screen")
-    ) {
-        if (hasCameraPermission) {
-            AndroidView(
-                factory = { ctx ->
-                    PreviewView(ctx).apply {
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
-                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                        cameraProviderFuture.addListener({
-                            try {
-                                val cameraProvider = cameraProviderFuture.get()
-                                cameraProviderRef = cameraProvider
-
-                                val preview = Preview.Builder()
-                                    .setTargetRotation(this.display?.rotation ?: Surface.ROTATION_0)
-                                    .build()
-                                    .also {
-                                        it.setSurfaceProvider(this.surfaceProvider)
-                                    }
-                                previewUseCase = preview
-
-                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    cameraSelector,
-                                    preview
-                                )
-                            } catch (e: Exception) {
-                                android.util.Log.e("UwbArCameraScreen", "Camera binding error in factory", e)
-                            }
-                        }, ContextCompat.getMainExecutor(ctx))
-                    }
-                },
-                update = { previewView ->
-                    // Keep update block lightweight to prevent unbinding/rebinding camera on recomposition
-                    try {
-                        previewUseCase?.targetRotation = currentSurfaceRotation
-                    } catch (e: Exception) {
-                        // ignore
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(Color(0xFF0C1F15), Color(0xFF030704))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "AR CAMERA FEED (CAMERA PERMISSION REQUIRED)",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = Color.Gray
-                )
-            }
-        }
-
-        val sensorSuite = uiState.sensorSuite
-        val pitchDegrees = sensorSuite.pitchDeg
-        val rollDegrees = sensorSuite.rollDeg
-
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(uiState.activeBlips, uiState.headingDegrees, mapRangeMeters, currentRotationDegrees) {
-                    detectTapGestures { tapOffset ->
-                        val w = size.width.toFloat()
-                        val h = size.height.toFloat()
-                        var closestId: String? = null
-                        var minDistance = Float.MAX_VALUE
-
-                        uiState.activeBlips.forEach { blip ->
-                            val proj = UwbArTracker.updateTargetPosition(
-                                blip = blip,
-                                headingDegrees = uiState.headingDegrees,
-                                pitchDegrees = pitchDegrees,
-                                rollDegrees = rollDegrees,
-                                mapRangeMeters = mapRangeMeters,
-                                containerWidth = w,
-                                containerHeight = h,
-                                rotationDegrees = currentRotationDegrees
-                            )
-                            val dist = kotlin.math.hypot(
-                                (proj.screenX - tapOffset.x).toDouble(),
-                                (proj.screenY - tapOffset.y).toDouble()
-                            ).toFloat()
-                            if (dist < minDistance) {
-                                minDistance = dist
-                                closestId = blip.id
-                            }
-                        }
-
-                        if (closestId != null && minDistance <= 65f) {
-                            onSelectTargetDevice(closestId)
-                        } else {
-                            onSelectTargetDevice(null)
-                        }
-                    }
-                }
-        ) {
-            val w = size.width
-            val h = size.height
-
-            val horizonY = h * 0.5f - (pitchDegrees / 90f * h * 0.3f)
-            drawLine(
-                color = Color(0xFF00FF66).copy(alpha = 0.25f),
-                start = Offset(w * 0.2f, horizonY),
-                end = Offset(w * 0.8f, horizonY),
-                strokeWidth = 1.5f
-            )
-
-            drawCircle(
-                color = Color(0xFF00FF66).copy(alpha = 0.4f),
-                radius = 24f,
-                center = Offset(w / 2f, h / 2f),
-                style = Stroke(width = 1.5f)
-            )
-            drawLine(
-                color = Color(0xFF00FF66).copy(alpha = 0.5f),
-                start = Offset(w / 2f - 12f, h / 2f),
-                end = Offset(w / 2f + 12f, h / 2f),
-                strokeWidth = 1.5f
-            )
-            drawLine(
-                color = Color(0xFF00FF66).copy(alpha = 0.5f),
-                start = Offset(w / 2f, h / 2f - 12f),
-                end = Offset(w / 2f, h / 2f + 12f),
-                strokeWidth = 1.5f
-            )
-
-            uiState.activeBlips.forEach { blip ->
-                val proj = UwbArTracker.updateTargetPosition(
-                    blip = blip,
-                    headingDegrees = uiState.headingDegrees,
-                    pitchDegrees = pitchDegrees,
-                    rollDegrees = rollDegrees,
-                    mapRangeMeters = mapRangeMeters,
-                    containerWidth = w,
-                    containerHeight = h,
-                    rotationDegrees = currentRotationDegrees
-                )
-
-                val isSelected = blip.id == uiState.selectedTargetDeviceId
-                val targetColor = when {
-                    isSelected -> Color(0xFFFFCC00)
-                    blip.distance < uiState.perimeterThresholdMeters -> Color(0xFFFF3366)
-                    blip.type == "WIFI" -> Color(0xFF00FF66)
-                    blip.type == "BLE" -> Color(0xFF00E5FF)
-                    else -> Color(0xFFFF9900)
-                }
-
-                val visualScale = (1.8f - (proj.depthRatio * 0.8f)).coerceIn(0.4f, 2.2f)
-                val arrowSize = 34f * visualScale
-                val px = proj.screenX
-                val py = proj.screenY
-
-                if (proj.isVisibleInFov) {
-                    if (isSelected) {
-                        // Ground Laser Drop Pillar to anchor signal location in 3D
-                        val groundY = (horizonY + h * 0.35f).coerceAtMost(h - 40f)
-                        drawLine(
-                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
-                            start = Offset(px, py),
-                            end = Offset(px, groundY),
-                            strokeWidth = 2f
-                        )
-                        drawCircle(
-                            color = Color(0xFFFFCC00).copy(alpha = 0.3f),
-                            radius = 18f * visualScale,
-                            center = Offset(px, groundY),
-                            style = Stroke(width = 1.5f)
-                        )
-                        drawCircle(
-                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
-                            radius = 6f * visualScale,
-                            center = Offset(px, groundY)
-                        )
-
-                        // Reticle Corner Brackets [ ]
-                        val boxSize = 45f * visualScale
-                        val bracketLen = 14f * visualScale
-                        val bx = px - boxSize / 2f
-                        val by = py - boxSize / 2f
-
-                        val reticlePath = Path().apply {
-                            // Top-Left
-                            moveTo(bx, by + bracketLen)
-                            lineTo(bx, by)
-                            lineTo(bx + bracketLen, by)
-                            // Top-Right
-                            moveTo(bx + boxSize - bracketLen, by)
-                            lineTo(bx + boxSize, by)
-                            lineTo(bx + boxSize, by + bracketLen)
-                            // Bottom-Right
-                            moveTo(bx + boxSize, by + boxSize - bracketLen)
-                            lineTo(bx + boxSize, by + boxSize)
-                            lineTo(bx + boxSize - bracketLen, by + boxSize)
-                            // Bottom-Left
-                            moveTo(bx + bracketLen, by + boxSize)
-                            lineTo(bx, by + boxSize)
-                            lineTo(bx, by + boxSize - bracketLen)
-                        }
-                        drawPath(path = reticlePath, color = Color(0xFFFFCC00), style = Stroke(width = 3f))
-
-                        // Vector guidance line from camera crosshair center
-                        drawLine(
-                            color = Color(0xFFFFCC00).copy(alpha = 0.4f),
-                            start = Offset(w / 2f, h / 2f),
-                            end = Offset(px, py),
-                            strokeWidth = 1.5f
-                        )
-                    }
-
-                    val path = Path().apply {
-                        moveTo(px, py - arrowSize)
-                        lineTo(px + arrowSize * 0.7f, py)
-                        lineTo(px, py + arrowSize * 0.6f)
-                        lineTo(px - arrowSize * 0.7f, py)
-                        close()
-                    }
-
-                    // AR Core Depth Mesh Simulation
-                    val simulatedDepthMapDistance = 2.0f + ((blip.id.hashCode() and 0x7FFFFFFF) % 50) / 10.0f
-                    val isOccludedByDepthMesh = blip.distance > simulatedDepthMapDistance
-
-                    if (isOccludedByDepthMesh) {
-                        // AR Core Depth Occlusion: Tactical X-Ray Wireframe
-                        drawPath(
-                            path = path,
-                            color = targetColor.copy(alpha = 0.25f),
-                            style = Fill
-                        )
-                        drawPath(
-                            path = path,
-                            color = targetColor.copy(alpha = 0.8f),
-                            style = Stroke(
-                                width = if (isSelected) 3f else 1.8f,
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-                            )
-                        )
-                    } else {
-                        // Direct Line-of-Sight: Solid Marker
-                        drawPath(
-                            path = path,
-                            color = targetColor.copy(alpha = if (isSelected) 0.85f else 0.55f),
-                            style = Fill
-                        )
-                        drawPath(
-                            path = path,
-                            color = targetColor,
-                            style = Stroke(width = if (isSelected) 3f else 1.8f)
-                        )
-                    }
-
-                    drawLine(
-                        color = targetColor.copy(alpha = 0.4f),
-                        start = Offset(px, py + arrowSize * 0.6f),
-                        end = Offset(px, py + arrowSize * 1.8f),
-                        strokeWidth = 1.5f
-                    )
-                    drawCircle(
-                        color = targetColor.copy(alpha = 0.6f),
-                        radius = 5f * visualScale,
-                        center = Offset(px, py + arrowSize * 1.8f),
-                        style = Stroke(width = 1.5f)
-                    )
-
-                    val elevStr = if (proj.estimatedElevationMeters >= 0) "+%.1fm".format(proj.estimatedElevationMeters) else "%.1fm".format(proj.estimatedElevationMeters)
-                    val ouiWarning = if (blip.isHighRiskVendor) "\n⚠ HIGH-RISK OUI" else ""
-                    val labelText = "${blip.name.take(12)}\n%.1fm • %ddBm\nALT: %s%s".format(blip.distance, blip.rssi, elevStr, ouiWarning)
-                    val textPaint = android.graphics.Paint().apply {
-                        color = if (blip.isHighRiskVendor) android.graphics.Color.RED else if (isSelected) android.graphics.Color.YELLOW else android.graphics.Color.WHITE
-                        textSize = (26f * visualScale).coerceIn(18f, 34f)
-                        typeface = android.graphics.Typeface.MONOSPACE
-                        isAntiAlias = true
-                        setShadowLayer(4f, 0f, 0f, android.graphics.Color.BLACK)
-                    }
-
-                    val lines = labelText.split("\n")
-                    var lineY = py - arrowSize - 10f
-                    lines.reversed().forEach { line ->
-                        drawContext.canvas.nativeCanvas.drawText(
-                            line,
-                            px - (textPaint.measureText(line) / 2f),
-                            lineY,
-                            textPaint
-                        )
-                        lineY -= textPaint.textSize + 4f
-                    }
-                } else {
-                    val edgeMargin = 36f
-                    val edgeX = if (proj.relativeAngleDegrees < 0) edgeMargin else w - edgeMargin
-                    val edgeY = py.coerceIn(edgeMargin, h - edgeMargin)
-
-                    val edgePath = Path().apply {
-                        if (proj.relativeAngleDegrees < 0) {
-                            moveTo(edgeX, edgeY)
-                            lineTo(edgeX + 22f, edgeY - 12f)
-                            lineTo(edgeX + 22f, edgeY + 12f)
-                        } else {
-                            moveTo(edgeX, edgeY)
-                            lineTo(edgeX - 22f, edgeY - 12f)
-                            lineTo(edgeX - 22f, edgeY + 12f)
-                        }
-                        close()
-                    }
-
-                    drawPath(path = edgePath, color = targetColor.copy(alpha = 0.7f), style = Fill)
-
-                    if (isSelected) {
-                        // Off-screen lock guidance ray
-                        drawLine(
-                            color = Color(0xFFFFCC00).copy(alpha = 0.6f),
-                            start = Offset(w / 2f, h / 2f),
-                            end = Offset(edgeX, edgeY),
-                            strokeWidth = 2f
-                        )
-                    }
-                }
-            }
-        }
-
-        // Top Directional Guidance Banner overlay when a device is selected
-        val selectedBlip = uiState.activeBlips.firstOrNull { it.id == uiState.selectedTargetDeviceId }
-        if (selectedBlip != null) {
-            val proj = UwbArTracker.updateTargetPosition(
-                blip = selectedBlip,
-                headingDegrees = uiState.headingDegrees,
-                pitchDegrees = uiState.sensorSuite.pitchDeg,
-                rollDegrees = uiState.sensorSuite.rollDeg,
-                mapRangeMeters = mapRangeMeters,
-                containerWidth = 1000f,
-                containerHeight = 1000f,
-                rotationDegrees = currentRotationDegrees
-            )
-
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 70.dp, start = 16.dp, end = 16.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF07120B).copy(alpha = 0.9f),
-                border = BorderStroke(1.dp, Color(0xFFFFCC00))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.GpsFixed,
-                        contentDescription = "Target Lock",
-                        tint = Color(0xFFFFCC00),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Column {
-                        val turnAngle = proj.relativeAngleDegrees.toInt()
-                        val turnDirection = when {
-                            turnAngle < -10 -> "◄ TURN LEFT ${kotlin.math.abs(turnAngle)}°"
-                            turnAngle > 10 -> "TURN RIGHT ${turnAngle}° ►"
-                            else -> "★ TARGET CENTERED IN FOV"
-                        }
-                        val elevTag = if (proj.estimatedElevationMeters >= 0) "+%.1fm".format(proj.estimatedElevationMeters) else "%.1fm".format(proj.estimatedElevationMeters)
-                        Text(
-                            text = "LOCKED: ${selectedBlip.name.take(16)} • %.1fm • ALT $elevTag".format(selectedBlip.distance),
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp
-                            ),
-                            color = Color(0xFFFFCC00)
-                        )
-                        Text(
-                            text = "$turnDirection • RSSI ${selectedBlip.rssi}dBm • PITCH ${proj.verticalAngleDegrees.toInt()}°",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 9.sp
-                            ),
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -850,6 +391,7 @@ fun FullScreenRadarScreen(
 @Composable
 fun FullScreenRadarMapOverlay(
     uiState: SignalRadarUiState,
+    anomalies: List<RfAnomalyEntity> = emptyList(),
     onDismiss: () -> Unit,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
@@ -861,7 +403,8 @@ fun FullScreenRadarMapOverlay(
     onToggleFocusMode: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
     onCycleRadarBoost: () -> Unit = {},
-    onRunAiDeepAudit: () -> Unit = {}
+    onRunAiDeepAudit: () -> Unit = {},
+    onAddSpatialPoint: (String, RfMeasurementPoint) -> Unit = { _, _ -> }
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -884,7 +427,8 @@ fun FullScreenRadarMapOverlay(
             onToggleFocusMode = onToggleFocusMode,
             onTriggerAiPinpoint = onTriggerAiPinpoint,
             onCycleRadarBoost = onCycleRadarBoost,
-            onRunAiDeepAudit = onRunAiDeepAudit
+            onRunAiDeepAudit = onRunAiDeepAudit,
+            onAddSpatialPoint = onAddSpatialPoint
         )
     }
 }
@@ -903,7 +447,8 @@ fun FullScreenRadarContent(
     onToggleFocusMode: () -> Unit = {},
     onTriggerAiPinpoint: (RadarBlip) -> Unit = {},
     onCycleRadarBoost: () -> Unit = {},
-    onRunAiDeepAudit: () -> Unit = {}
+    onRunAiDeepAudit: () -> Unit = {},
+    onAddSpatialPoint: (String, RfMeasurementPoint) -> Unit = { _, _ -> }
 ) {
     val sensorSuite = uiState.sensorSuite
     val activeMode = uiState.fullScreenMapMode
@@ -950,7 +495,8 @@ fun FullScreenRadarContent(
                     uiState = uiState,
                     mapRangeMeters = uiState.mapRangeMeters,
                     onSelectTargetDevice = onSelectTargetDevice,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    onAddSpatialPoint = onAddSpatialPoint
                 )
             }
             else -> {
@@ -1213,46 +759,56 @@ fun FullScreenRadarContent(
                             color = Color.Gray
                         )
                         listOf(5f, 15f, 30f, 60f).forEach { scale ->
-                            val isCurrentScale = uiState.mapRangeMeters.toInt() == scale.toInt()
+                            val isCurrentScale = kotlin.math.abs(uiState.mapRangeMeters - scale) < 0.5f
+                            val label = "${scale.toInt()}m"
                             Box(
+                                contentAlignment = Alignment.Center,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isCurrentScale) Color(0xFF00E5FF) else Color(0xFF0F261B))
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isCurrentScale) Color(0xFF00FF66) else Color(0xFF0F261B))
+                                    .border(
+                                        1.dp,
+                                        if (isCurrentScale) Color.White else Color(0xFF00FF66).copy(alpha = 0.35f),
+                                        RoundedCornerShape(8.dp)
+                                    )
                                     .clickable { onSetMapRange(scale) }
-                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = "${scale.toInt()}m",
+                                    text = label,
                                     style = MaterialTheme.typography.labelSmall.copy(
-                                        fontSize = 8.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace
                                     ),
-                                    color = if (isCurrentScale) Color.Black else Color(0xFF00E5FF)
+                                    color = if (isCurrentScale) Color.Black else Color(0xFF00FF66)
                                 )
                             }
                         }
                     }
 
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
                             onClick = onZoomIn,
                             modifier = Modifier
-                                .size(28.dp)
-                                .background(Color(0xFF0C2417), CircleShape)
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .background(Color(0xFF0C2417), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = Color(0xFF00FF66), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = Color(0xFF00FF66), modifier = Modifier.size(18.dp))
                         }
                         IconButton(
                             onClick = onZoomOut,
                             modifier = Modifier
-                                .size(28.dp)
-                                .background(Color(0xFF0C2417), CircleShape)
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                .background(Color(0xFF0C2417), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF00FF66).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                         ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = Color(0xFF00FF66), modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = Color(0xFF00FF66), modifier = Modifier.size(18.dp))
                         }
                     }
                 }

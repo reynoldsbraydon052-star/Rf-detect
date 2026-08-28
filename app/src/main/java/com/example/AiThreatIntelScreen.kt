@@ -42,6 +42,7 @@ import java.util.*
 fun AiThreatIntelScreen(
     uiState: SignalRadarUiState,
     threatReport: ThreatAnalysisReport?,
+    investigatorAssessment: AiInvestigatorAssessment? = null,
     isAnalyzing: Boolean,
     copilotMessages: List<TacticalCopilotMessage>,
     isCopilotThinking: Boolean,
@@ -52,7 +53,9 @@ fun AiThreatIntelScreen(
     onSelectTargetOnRadar: (String) -> Unit,
     onOpenRadarTab: () -> Unit,
     onTriggerDeepAudit: (FlaggedThreatEmitter) -> Unit = {},
-    onCloseDeepAudit: () -> Unit = {}
+    onSaveInterpretation: () -> Unit = {},
+    onCloseDeepAudit: () -> Unit = {},
+    onTestGeminiConnection: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     var copilotInputText by remember { mutableStateOf("") }
@@ -157,6 +160,20 @@ fun AiThreatIntelScreen(
                                     ),
                                     color = Color.White
                                 )
+                                val (statusText, statusColor) = when {
+                                    isAnalyzing -> "ANALYZING RF SPECTRUM..." to Color(0xFFFFCC00)
+                                    else -> when (uiState.geminiStatus) {
+                                        GeminiStatus.READY -> "GEMINI 3.5 FLASH READY" to Color(0xFF00FF66)
+                                        GeminiStatus.MISSING_KEY -> "API KEY MISSING (LOCAL ONLY)" to Color(0xFFFF4444)
+                                        GeminiStatus.AUTH_ERROR -> "API KEY AUTH ERROR" to Color(0xFFFF4444)
+                                        GeminiStatus.QUOTA_EXCEEDED -> "GEMINI QUOTA EXCEEDED" to Color(0xFFFF9900)
+                                        GeminiStatus.MODEL_ERROR -> "MODEL CONFIG ERROR" to Color(0xFFFF4444)
+                                        GeminiStatus.NETWORK_ERROR -> "NETWORK TIMEOUT / ERROR" to Color(0xFFFFCC00)
+                                        GeminiStatus.SERVER_ERROR -> "GEMINI SERVER ERROR" to Color(0xFFFF4444)
+                                        GeminiStatus.PARSE_ERROR -> "RESPONSE PARSE ERROR" to Color(0xFFFFCC00)
+                                        GeminiStatus.UNKNOWN_ERROR -> "UNKNOWN SERVICE ERROR" to Color(0xFFFFCC00)
+                                    }
+                                }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -165,16 +182,16 @@ fun AiThreatIntelScreen(
                                         modifier = Modifier
                                             .size(8.dp)
                                             .clip(CircleShape)
-                                            .background(if (isAnalyzing) Color(0xFFFFCC00) else Color(0xFF00FF66))
+                                            .background(statusColor)
                                     )
                                     Text(
-                                        text = if (isAnalyzing) "ANALYZING RF SPECTRUM..." else "GEMINI 3.5 FLASH READY",
+                                        text = statusText,
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         ),
-                                        color = if (isAnalyzing) Color(0xFFFFCC00) else Color(0xFF00FF66)
+                                        color = statusColor
                                     )
                                 }
                             }
@@ -411,6 +428,101 @@ fun AiThreatIntelScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Real-Time Gemini API Diagnostic Panel
+        item {
+            val cs = uiState.geminiConnectionState
+            val (stateLabel, stateColor, icon) = when (cs) {
+                is GeminiConnectionState.NotConfigured -> Triple("NOT CONFIGURED", Color.Gray, Icons.Default.Info)
+                is GeminiConnectionState.Testing -> Triple("TESTING...", Color(0xFFFFCC00), Icons.Default.Refresh)
+                is GeminiConnectionState.Connected -> Triple("CONNECTED", Color(0xFF00FF66), Icons.Default.CheckCircle)
+                is GeminiConnectionState.AuthenticationError -> Triple("AUTH ERROR", Color(0xFFFF4444), Icons.Default.Error)
+                is GeminiConnectionState.HttpError -> Triple("HTTP ERROR", Color(0xFFFF4444), Icons.Default.Error)
+                is GeminiConnectionState.NetworkError -> Triple("NETWORK ERROR", Color(0xFFFFCC00), Icons.Default.CloudQueue)
+            }
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("gemini_realtime_status_panel"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF08130D)),
+                border = BorderStroke(1.dp, stateColor.copy(alpha = 0.4f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = "Connection Status",
+                                tint = stateColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "GEMINI API STATUS:",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                color = Color.White
+                            )
+                            Text(
+                                text = stateLabel,
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = stateColor
+                            )
+                        }
+
+                        val isTesting = cs is GeminiConnectionState.Testing
+                        Text(
+                            text = if (isTesting) "RUNNING..." else "DIAGNOSE",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            ),
+                            color = if (isTesting) Color.Gray else Color(0xFF00FF66),
+                            modifier = Modifier
+                                .clickable(enabled = !isTesting) { onTestGeminiConnection() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    val detailText = when (cs) {
+                        is GeminiConnectionState.NotConfigured -> "Gemini API key is unconfigured. Features requiring Gemini are inactive."
+                        is GeminiConnectionState.Testing -> "Verifying reachability with the Google generative model server..."
+                        is GeminiConnectionState.Connected -> "Live with ${cs.model}. Tactical summarization & spectrum auditing active."
+                        is GeminiConnectionState.AuthenticationError -> "Authentication failed (Code ${cs.code}): ${cs.message}."
+                        is GeminiConnectionState.HttpError -> "HTTP Exception (${cs.code}): ${cs.message}."
+                        is GeminiConnectionState.NetworkError -> "Network unreachable: ${cs.message}."
+                    }
+
+                    Text(
+                        text = detailText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.5.sp,
+                            lineHeight = 14.sp
+                        ),
+                        color = Color.LightGray
+                    )
                 }
             }
         }

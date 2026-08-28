@@ -8,11 +8,13 @@ import android.os.Build
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -118,6 +120,7 @@ enum class RadarGridMode(
 
 enum class RadarTab {
     SWEEP_RADAR,
+    SIMULATION_LAB,
     FULL_RADAR,
     AI_THREAT_ANALYSIS,
     SCANNER,
@@ -127,11 +130,48 @@ enum class RadarTab {
     MAGNETOMETER_EMF,
     SECURITY_GUARD,
     CSV_LOG_CONSOLE,
-    SETTINGS
+    SETTINGS,
+    EVENT_RECORDER,
+    ENVIRONMENT_MAP,
+    IDENTITY_GRAPH,
+    INTELLIGENCE_DASHBOARD,
+    ADAPTIVE_LOCALIZATION
 }
 
+enum class ViewMode {
+    MAP,
+    RADAR,
+    HYBRID
+}
+
+data class SpatialSurveyState(
+    val isActive: Boolean = false,
+    val isPaused: Boolean = false,
+    val targetId: String? = null,
+    val points: List<RfMeasurementPoint> = emptyList(),
+    val distanceWalkedFt: Float = 0f,
+    val currentX: Float = 0f,
+    val currentY: Float = 0f,
+    val guidance: String = "Walk forward to begin spatial mapping.",
+    val isLocalizationValid: Boolean = false,
+    val errorMsg: String? = "LOCALIZATION INVALID: Incomplete covariance model. Gather more distinct directional points.",
+    val estimatedX: Float? = null,
+    val estimatedY: Float? = null,
+    val confidence: Int = 0,
+    val isSpatialCoveragePoor: Boolean = false,
+    val isSignalWeakening: Boolean = false,
+    val isSignalUnstable: Boolean = false,
+    val areaSqFt: Float = 0f,
+    val rssiRangeStr: String = "0",
+    val signalTrendStr: String = "CALCULATING",
+    val stepCountAtStart: Int = 0
+)
+
 data class SignalRadarUiState(
+    val spatialSurveyState: SpatialSurveyState = SpatialSurveyState(),
     val selectedTab: RadarTab = RadarTab.SWEEP_RADAR,
+    val viewMode: ViewMode = ViewMode.HYBRID,
+    val geminiStatus: GeminiStatus = GeminiStatus.READY,
     val headingDegrees: Float = 0f,
     val activeBlips: List<RadarBlip> = emptyList(),
     val nearestBlip: RadarBlip? = null,
@@ -148,7 +188,9 @@ data class SignalRadarUiState(
     val activeAntennaCount: Int = 6, // Wi-Fi, BLE, Cell, GNSS, UWB, NFC
     val selectedFilterType: String = "ALL", // "ALL", "WIFI", "CELLULAR", "BLE", "MAGNETIC", "AUDIO"
     val magnetometerData: MagnetometerData = MagnetometerData(),
+    val baselineSummary: BaselineSummary = BaselineSummary(),
     val acousticData: AcousticFrequencyData = AcousticFrequencyData(),
+    val correlationEvents: List<CorrelationEvent> = emptyList(),
     val calibrationNotificationMessage: String? = null,
     val antennaArrayTelemetry: List<AntennaTelemetry> = emptyList(),
     val savedBleDevices: List<BleDeviceEntity> = emptyList(),
@@ -161,8 +203,11 @@ data class SignalRadarUiState(
     val acousticAlertThresholdDb: Int = -50, // -80 to -10 dB
     val stealthModeEnabled: Boolean = false,
     // Interactive Map & Proximity Sonar State:
-    val mapRangeMeters: Float = 30.0f,
+    val mapRangeMeters: Float = 15.0f,
+    val currentRadarRangeMeters: Float = 15.0f,
     val selectedTargetDeviceId: String? = null,
+    val selectedDeviceId: String? = null,
+    val lockedTargetDeviceId: String? = null,
     val isMapMaximized: Boolean = false,
     // Configurable Radar Grid & Coverage Overlay State:
     val radarGridMode: RadarGridMode = RadarGridMode.POLAR,
@@ -174,6 +219,7 @@ data class SignalRadarUiState(
     val isFullScreenMapVisible: Boolean = false,
     val fullScreenMapMode: String = "TACTICAL", // "TACTICAL", "HEATMAP", "SAT_GRID"
     val sensorSuite: HardwareSensorSuiteData = HardwareSensorSuiteData(),
+    val operatingMode: OperatingMode = OperatingMode.LIVE,
     // Background Alert Service & Threshold Notification Settings State:
     val isBackgroundAlertServiceActive: Boolean = true,
     val isHapticAlertsEnabled: Boolean = true,
@@ -206,6 +252,10 @@ data class SignalRadarUiState(
     val sortByPriority: String = "DISTANCE", // "DISTANCE" (Closest First), "RSSI" (Strongest First), "RISK" (Breaches & High Risk First)
     // Gemini AI SIGINT & Threat Intelligence State:
     val threatAnalysisReport: ThreatAnalysisReport? = null,
+
+    val investigatorAssessment: AiInvestigatorAssessment? = null,
+    val savedInterpretations: List<AiInterpretation> = emptyList(),
+
     val isAiAnalyzingThreats: Boolean = false,
     val isAiDeepAuditDialogOpen: Boolean = false,
     val copilotMessages: List<TacticalCopilotMessage> = emptyList(),
@@ -216,27 +266,129 @@ data class SignalRadarUiState(
     val radarBoostLevel: RadarBoostLevel = RadarBoostLevel.NORMAL_1X,
     val activePinpointResult: AiPinpointResult? = null,
     val isPinpointingActive: Boolean = false,
-    val isPinpointDialogOpen: Boolean = false
+    val isPinpointDialogOpen: Boolean = false,
+    val geminiConnectionState: GeminiConnectionState = GeminiConnectionState.NotConfigured,
+    val networkSpeedTestResult: String? = null,
+    val aiInferenceMode: AiInferenceMode = AiInferenceMode.GEMINI_CLOUD,
+    val localModelStatus: String = "Local Model: Unloaded",
+    val geminiApiKeyExists: Boolean = false,
+    val currentAlarmState: AlarmState = AlarmState.NORMAL,
+    val enterRssiDbm: Int = -42,
+    val exitRssiDbm: Int = -45,
+    val requiredConsecutiveObservations: Int = 3,
+    val proximityAlertCooldownMs: Long = 5000L,
+    val measurementHistory: List<RfMeasurementPoint> = emptyList(),
+    val spatialHistoryMap: Map<String, List<RfMeasurementPoint>> = emptyMap(),
+    val activeProbabilityVolume: ProbabilityVolume? = null
+)
+
+data class BaselineStats(
+    val observations: Long = 0L,
+    val avgActiveBlips: Float = 0f,
+    val avgFreqOccupancy: Float = 0f,
+    val startedAtMs: Long = 0L
+)
+
+data class TriggeredAlertRecord(
+    val deviceId: String,
+    val alertType: String, // "BREACH", "RSSI", "VENDOR", "MAGNETIC"
+    val timestamp: Long
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
+    
+    
+    val simulationEngine = SimulationLabEngine(this)
+
 
     private val settingsDataStore = SettingsDataStore(application)
     private val signalProvider = SignalProvider(application)
 
     private val bleDatabase = BleDatabase.getInstance(application)
     private val bleRepository = BleDeviceRepository(bleDatabase.bleDeviceDao())
+    private val fingerprintEngine = SignalFingerprintEngine(bleDatabase.signalFingerprintDao())
+    private val baselineEngine = EnvironmentalBaselineEngine()
+    private val anomalyEngine = ExplainableAnomalyEngine()
+    private val correlationEngine = MultiSensorCorrelationEngine()
     private val bleScannerService = BleScannerServiceEngine(application, bleRepository)
+    private val rfRecordingDatabase = RfRecordingDatabase.getInstance(application)
+    private val rfRecordingRepository = RfRecordingRepository(rfRecordingDatabase.rfRecordedEventDao())
+    val db = RfRecordingDatabase.getInstance(getApplication())
+    val rfSessionEngine = RfInvestigationSessionEngine(db.rfSessionDao(), db.rfAnnotationDao())
+    
+    val rfEventRecorderEngine = RfEventRecorderEngine(rfRecordingRepository, viewModelScope, rfSessionEngine)
+    val replayEngine = ReplayEngine(this, rfRecordingRepository, rfSessionEngine)
+    val environmentMappingEngine = RfEnvironmentMappingEngine()
+    val evidenceEngine = EvidenceEngine(RfRecordingDatabase.getInstance(getApplication()).evidenceDao())
+    val deviceIdentityEngine = DeviceIdentityEngine(getApplication(), RfRecordingDatabase.getInstance(getApplication()).deviceIdentityDao(), evidenceEngine)
+    
+    val rfAnomalyEngine = RfAnomalyCorrelationEngine(RfRecordingDatabase.getInstance(getApplication()).rfAnomalyDao(), RfRecordingDatabase.getInstance(getApplication()).anomalyCorrelationDao())
+    val rfPatternEngine = RfTemporalPatternEngine(RfRecordingDatabase.getInstance(getApplication()).rfPatternDao())
+    val rfIntelligenceEngine = RfIntelligenceCorrelationEngine(rfSessionEngine, rfAnomalyEngine, rfPatternEngine, deviceIdentityEngine)
+    val rfCrossSessionEngine = RfCrossSessionAnalysisEngine(RfRecordingDatabase.getInstance(getApplication()).rfSessionDao(), RfRecordingDatabase.getInstance(getApplication()).deviceIdentityDao(), RfRecordingDatabase.getInstance(getApplication()).rfPatternDao())
 
     private val hardwareSpectrumManager = HardwareSpectrumManager(application)
     private val audioTracker = AudioRadarTracker()
+    val sonarState = audioTracker.currentState
     private val historyLogger = SignalHistoryLogger(application)
     private val alarmEngine = PerimeterAlarmEngine(application)
-    private val geminiThreatService = GeminiThreatAnalysisService()
+    private val geminiEngine = GeminiCloudEngine()
+    private val localEngine = LlamaCppEngine(application)
+    private val aiRouter = AiEngineRouter(geminiEngine, localEngine, settingsDataStore)
+    private val geminiThreatService = TacticalAiGateway(aiRouter)
+
+    // Target-specific thresholds & hysteresis
+    val targetRssiThresholds = mutableStateMapOf<String, Int>()
+    val targetDistanceThresholds = mutableStateMapOf<String, Float>()
+    private val lastAlertTimeMap = mutableMapOf<String, Long>()
+    private val triggeredAlertHistory = mutableListOf<TriggeredAlertRecord>()
+
+    // Proximity Alert 2.0 State Tracking variables
+    private var consecutiveValidTriggerCount = 0
+    private var consecutiveValidExitCount = 0
+    private var consecutiveValidNormalCount = 0
+    private var consecutiveValidApproachingCount = 0
+    private var alarmCooldownStartTimeMs = 0L
+    private var alarmHasExitedHysteresis = false
+    private var lastAlarmTargetId: String? = null
+
+    fun setTargetRssiThreshold(targetId: String, threshold: Int) {
+        targetRssiThresholds[targetId] = threshold
+    }
+
+    fun setTargetDistanceThreshold(targetId: String, threshold: Float) {
+        targetDistanceThresholds[targetId] = threshold
+    }
+
+    fun setProximityThresholds(enterRssi: Int, exitRssi: Int, requiredConsecutive: Int, cooldownMs: Long) {
+        _uiState.update {
+            it.copy(
+                enterRssiDbm = enterRssi,
+                exitRssiDbm = exitRssi,
+                requiredConsecutiveObservations = requiredConsecutive,
+                proximityAlertCooldownMs = cooldownMs
+            )
+        }
+    }
 
     // Hardware Sensor & Telemetry Engines
     val uwbEngine = UwbSensorEngine(application)
     val wifiRttAwareManager = WifiRttAwareManager(application)
+
+    // RF Acquisition Layer & Signal Fusion Components (Android 16 Passive-Bypass)
+    val wifiDiscoveryScanner = WifiDiscoveryScanner(application, viewModelScope)
+    val bleDiscoveryScanner = BleDiscoveryScanner(application, viewModelScope)
+    val targetRangingEngine = TargetRangingEngine(application, viewModelScope)
+    val signalFusionManager = SignalFusionManager(application, viewModelScope, wifiDiscoveryScanner, bleDiscoveryScanner, targetRangingEngine)
+    val passiveBypassFusedState = signalFusionManager.fusedState
+
+    fun startActiveRangingBypass(macAddress: String) {
+        signalFusionManager.startActiveTracking(macAddress)
+    }
+
+    fun stopActiveRangingBypass() {
+        signalFusionManager.stopActiveTracking()
+    }
     val bleTrackerEngine = BleTrackerDetectionEngine(application)
     val cellularTelephonyManager = CellularTelephonyManager(application)
     val ultrasonicAudioInterceptor = UltrasonicAudioFftInterceptor(application)
@@ -249,12 +401,56 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
     private val kalmanFilters = mutableMapOf<String, KalmanFilter>()
     private val blipMap = mutableMapOf<String, RadarBlip>()
+    private var cachedFingerprints = mapOf<String, SignalFingerprint>()
+    private var cachedBaselineStats: BaselineStats = BaselineStats()
     private var lastBlipUiUpdateMs = 0L
+
+    private val _viewMode = MutableStateFlow(ViewMode.HYBRID)
+    val viewMode: StateFlow<ViewMode> = _viewMode.asStateFlow()
+
+    private val _currentRadarRangeMeters = MutableStateFlow(15.0f)
+    val currentRadarRangeMeters: StateFlow<Float> = _currentRadarRangeMeters.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _macFilterMask = MutableStateFlow("")
+    val macFilterMask: StateFlow<String> = _macFilterMask.asStateFlow()
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
+
+    fun setMacFilterMask(mask: String) {
+        _macFilterMask.value = mask
+    }
 
     private val _uiState = MutableStateFlow(SignalRadarUiState())
     val uiState: StateFlow<SignalRadarUiState> = _uiState.asStateFlow()
 
     init {
+
+        viewModelScope.launch {
+            geminiThreatService.geminiStatus.collect { status ->
+                _uiState.update { it.copy(geminiStatus = status) }
+            }
+        }
+        viewModelScope.launch {
+            geminiThreatService.connectionState.collect { state ->
+                _uiState.update { it.copy(geminiConnectionState = state) }
+            }
+        }
+        viewModelScope.launch {
+            rfSessionEngine.loadActiveSession()
+            val active = rfSessionEngine.activeSession.value
+            if (active == null) {
+                rfSessionEngine.createNewSession("Investigation - " + java.util.UUID.randomUUID().toString().take(8))
+            }
+            val sessionId = rfSessionEngine.getActiveSessionId()
+            if (sessionId != null) {
+                deviceIdentityEngine.loadHypothesesForSession(sessionId)
+            }
+        }
         // Collect persistent settings from DataStore
         viewModelScope.launch {
             settingsDataStore.defaultRangeMeters.collect { range ->
@@ -276,6 +472,32 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 _uiState.update { it.copy(maxVisibleDevices = maxDevices) }
             }
         }
+
+        // Baseline settings and models
+        viewModelScope.launch {
+            settingsDataStore.isBaselineLearningMode.collect { isLearning ->
+                val prev = _uiState.value.baselineSummary
+                _uiState.update { it.copy(baselineSummary = prev.copy(isLearning = isLearning)) }
+            }
+        }
+        viewModelScope.launch {
+            bleDatabase.signalFingerprintDao().getAllFingerprintsFlow().collect { entities ->
+                cachedFingerprints = entities.associateBy { it.id }.mapValues { it.value.toDomainModel() }
+            }
+        }
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                settingsDataStore.baselineObservations,
+                settingsDataStore.baselineAvgActiveBlips,
+                settingsDataStore.baselineAvgFreqOccupancy,
+                settingsDataStore.baselineStartedAtMs
+            ) { obs, blips, freq, started ->
+                BaselineStats(obs, blips, freq, started)
+            }.collect { stats ->
+                cachedBaselineStats = stats
+            }
+        }
+
         viewModelScope.launch {
             settingsDataStore.radarGridModeStr.collect { modeStr ->
                 val mode = try {
@@ -295,6 +517,27 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             settingsDataStore.showCoverageZones.collect { show ->
                 _uiState.update { it.copy(showCoverageRings = show) }
             }
+        }
+
+        // Collect AI Inference and status settings
+        viewModelScope.launch {
+            settingsDataStore.aiInferenceMode.collect { mode ->
+                _uiState.update { it.copy(aiInferenceMode = mode) }
+            }
+        }
+        viewModelScope.launch {
+            val credStore = AiCredentialStore.getInstance(application)
+            val hasKey = credStore.hasGeminiApiKey()
+            _uiState.update { it.copy(geminiApiKeyExists = hasKey) }
+        }
+        viewModelScope.launch {
+            val available = localEngine.isAvailable()
+            val statusText = if (available) {
+                "Local GGUF Model: Loaded & Operational"
+            } else {
+                "Local GGUF Model: Unloaded (Model files not detected)"
+            }
+            _uiState.update { it.copy(localModelStatus = statusText) }
         }
 
         // Start Multi-Sensor Signal Provider Engine
@@ -373,6 +616,8 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                     headingDegrees = if (suiteData.compassHeading > 0f) suiteData.compassHeading else state.headingDegrees
                 )
             }
+            bleScannerService.updateStationaryState(suiteData.isStationary || !suiteData.isMotionDetected)
+            updateSurveyStep(suiteData.stepCount, if (suiteData.compassHeading > 0f) suiteData.compassHeading else _uiState.value.headingDegrees)
         }
         hardwareSensorSuiteManager?.startListening()
 
@@ -401,10 +646,21 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                     val filtered = state.activeDeviceAlerts.filterNot { it.id == alert.id }
                     state.copy(activeDeviceAlerts = listOf(alert) + filtered)
                 }
+                // Auto-dismiss after 4 seconds to keep the screen and scroll areas completely free of clutter
+                launch {
+                    delay(4000L)
+                    _uiState.update { state ->
+                        state.copy(activeDeviceAlerts = state.activeDeviceAlerts.filterNot { it.id == alert.id })
+                    }
+                }
             }
         }
 
         // --- Start Advanced Multi-Sensor Hardware Engines ---
+        // Start passive-bypass RF Acquisition Layer scans
+        wifiDiscoveryScanner.startScanning()
+        bleDiscoveryScanner.startScanning()
+
         uwbEngine.startRangingEngine()
         viewModelScope.launch {
             uwbEngine.uwbStateFlow.collect { uwb ->
@@ -501,7 +757,12 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 }
                 val telemetry = hardwareSpectrumManager.getAntennaArrayTelemetry()
                 _uiState.update { it.copy(antennaArrayTelemetry = telemetry) }
-                delay(_uiState.value.scanMode.delayMs)
+                
+                // Adaptive sweep delay: when stationary, throttle sweep frequency to save CPU and battery
+                val isStationary = _uiState.value.sensorSuite.isStationary || !_uiState.value.sensorSuite.isMotionDetected
+                val baseDelay = _uiState.value.scanMode.delayMs
+                val adaptiveDelay = if (isStationary) (baseDelay * 3).coerceAtMost(5000L) else baseDelay
+                delay(adaptiveDelay)
             }
         }
 
@@ -563,6 +824,20 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private var baselineAltitudeMeters = 0f
 
     private fun processSignalIntercept(rawBlip: RadarBlip) {
+
+
+        val anomaly = anomalyEngine.evaluateAnomaly(rawBlip, cachedFingerprints, _uiState.value.baselineSummary)
+        val blipWithAnomaly = rawBlip.copy(anomalyResult = anomaly)
+        
+        val newCorrelations = correlationEngine.processObservation(blipWithAnomaly)
+        if (newCorrelations.isNotEmpty()) {
+            _uiState.update { state -> 
+                val updatedCorrelations = (newCorrelations + state.correlationEvents)
+                    .sortedByDescending { it.firstObservationMs }
+                    .take(50) // Keep latest 50
+                state.copy(correlationEvents = updatedCorrelations)
+            }
+        }
         val distanceFilter = kalmanFilters.getOrPut("${rawBlip.id}_dist") { KalmanFilter(processNoise = 0.008f, measurementNoise = 0.4f) }
         val rssiFilter = kalmanFilters.getOrPut("${rawBlip.id}_rssi") { KalmanFilter(processNoise = 0.05f, measurementNoise = 1.0f) }
 
@@ -587,30 +862,190 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
         blipMap[smoothedBlip.id] = smoothedBlip
 
+        viewModelScope.launch(Dispatchers.IO) {
+            val fpResult = fingerprintEngine.processObservation(smoothedBlip)
+            val existing = blipMap[smoothedBlip.id]
+            if (existing != null) {
+                blipMap[smoothedBlip.id] = existing.copy(
+                    fingerprintId = fpResult.fingerprint.id,
+                    fingerprintConfidence = fpResult.confidence
+                )
+                _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+            }
+
+            // Isolated local AI RAG ingestion (safeguarded to ensure RF scanning never fails)
+            try {
+                val input = AiMemoryInput(
+                    targetId = smoothedBlip.id,
+                    deviceType = smoothedBlip.type,
+                    protocol = smoothedBlip.bandLabel,
+                    displayName = smoothedBlip.name,
+                    sanitizedAddress = smoothedBlip.id,
+                    rssi = smoothedBlip.rssi,
+                    anomalySummary = smoothedBlip.anomalyResult?.let { it.category.name + " (Score: " + it.score + ")" },
+                    measurementSummary = "Distance: " + smoothedBlip.distance + "m, angle: " + (smoothedBlip.targetAngleOffset ?: 0f)
+                )
+                AiMemoryIngestorProvider.getIngestor(getApplication()).ingest(input)
+            } catch (e: Exception) {
+                // Safeguard scanning stability
+            }
+        }
+
         if (smoothedBlip.ouiVendor == null && rawBlip.id.length >= 8) {
-            viewModelScope.launch(Dispatchers.IO) {
-                val macPrefix = rawBlip.id.take(8).uppercase()
-                if (macPrefix.matches(Regex("^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$"))) {
-                    val db = OuiDatabase.getDatabase(getApplication())
-                    val ouiData = db.ouiDao().getVendorByPrefix(macPrefix)
-                    if (ouiData != null) {
-                        val existing = blipMap[rawBlip.id]
-                        if (existing != null) {
-                            blipMap[rawBlip.id] = existing.copy(
-                                ouiVendor = ouiData.vendorName,
-                                isHighRiskVendor = ouiData.isHighRisk
-                            )
-                            _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+            val localVendor = MacOuidResolver.resolveVendor(rawBlip.id)
+            if (localVendor != null) {
+                val existing = blipMap[rawBlip.id]
+                if (existing != null) {
+                    val isHighRisk = localVendor == "Espressif Systems" || localVendor == "Hangzhou Hikvision" || localVendor == "Dahua Technology"
+                    blipMap[rawBlip.id] = existing.copy(
+                        ouiVendor = localVendor,
+                        isHighRiskVendor = isHighRisk
+                    )
+                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                }
+            } else {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val macPrefix = rawBlip.id.take(8).uppercase()
+                    if (macPrefix.matches(Regex("^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$"))) {
+                        val db = OuiDatabase.getDatabase(getApplication())
+                        val ouiData = db.ouiDao().getVendorByPrefix(macPrefix)
+                        if (ouiData != null) {
+                            val existing = blipMap[rawBlip.id]
+                            if (existing != null) {
+                                blipMap[rawBlip.id] = existing.copy(
+                                    ouiVendor = ouiData.vendorName,
+                                    isHighRiskVendor = ouiData.isHighRisk
+                                )
+                                _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                            }
                         }
                     }
                 }
             }
         }
 
-        val threshold = _uiState.value.perimeterThresholdMeters
-        val isBreach = smoothedDistance < threshold
+        val targetId = smoothedBlip.id
+        val baseRssiThreshold = targetRssiThresholds[targetId] ?: _uiState.value.rssiAlertThresholdDbm
+        val baseDistanceThreshold = targetDistanceThresholds[targetId] ?: _uiState.value.perimeterThresholdMeters
 
-        val rssiThreshold = _uiState.value.rssiAlertThresholdDbm
+        // State Machine for the selected target (Proximity Alert 2.0)
+        if (targetId == _uiState.value.selectedTargetDeviceId) {
+            val currentRssi = smoothedRssi
+            val nowMs = System.currentTimeMillis()
+
+            // Validate observation (invalid / stale checks)
+            val isStale = (nowMs - smoothedBlip.timestampMs > 10000L)
+            val isRssiInvalid = (currentRssi > -10 || currentRssi < -115)
+            val isValidObservation = !isStale && !isRssiInvalid
+
+            if (isValidObservation) {
+                val enterLimit = _uiState.value.enterRssiDbm
+                val exitLimit = _uiState.value.exitRssiDbm
+                val requiredSamples = _uiState.value.requiredConsecutiveObservations
+                val cooldownMs = _uiState.value.proximityAlertCooldownMs
+
+                val approachingEnterLimit = enterLimit - 8
+                val approachingExitLimit = exitLimit - 8
+
+                val prevState = _uiState.value.currentAlarmState
+                var nextState = prevState
+
+                // Handle sequential tracking counters based on RSSI thresholds
+                if (currentRssi >= enterLimit) {
+                    consecutiveValidTriggerCount++
+                    consecutiveValidExitCount = 0
+                    consecutiveValidApproachingCount = 0
+                    consecutiveValidNormalCount = 0
+                } else if (currentRssi < exitLimit) {
+                    consecutiveValidExitCount++
+                    consecutiveValidTriggerCount = 0
+                    if (currentRssi < approachingExitLimit) {
+                        consecutiveValidNormalCount++
+                        consecutiveValidApproachingCount = 0
+                    } else {
+                        consecutiveValidApproachingCount++
+                        consecutiveValidNormalCount = 0
+                    }
+                } else {
+                    // Inside the hysteresis region
+                    // Reset counts for trigger and exit to prevent oscillations from meeting consecutive sample requirement
+                    consecutiveValidTriggerCount = 0
+                    consecutiveValidExitCount = 0
+                    consecutiveValidNormalCount = 0
+                    consecutiveValidApproachingCount = 0
+                }
+
+                when (prevState) {
+                    AlarmState.NORMAL -> {
+                        if (consecutiveValidTriggerCount >= requiredSamples) {
+                            nextState = AlarmState.TRIGGERED
+                        } else if (consecutiveValidApproachingCount >= requiredSamples) {
+                            nextState = AlarmState.APPROACHING
+                        }
+                    }
+                    AlarmState.APPROACHING -> {
+                        if (consecutiveValidTriggerCount >= requiredSamples) {
+                            nextState = AlarmState.TRIGGERED
+                        } else if (consecutiveValidNormalCount >= requiredSamples) {
+                            nextState = AlarmState.NORMAL
+                        }
+                    }
+                    AlarmState.TRIGGERED -> {
+                        if (consecutiveValidExitCount >= requiredSamples) {
+                            nextState = AlarmState.COOLDOWN
+                            alarmCooldownStartTimeMs = nowMs
+                            alarmHasExitedHysteresis = true
+                        }
+                    }
+                    AlarmState.COOLDOWN -> {
+                        // Drop below exitLimit during or after cooldown resets exiting check
+                        if (currentRssi < exitLimit) {
+                            alarmHasExitedHysteresis = true
+                        }
+                        
+                        val isCooldownExpired = (nowMs - alarmCooldownStartTimeMs >= cooldownMs)
+                        if (isCooldownExpired && alarmHasExitedHysteresis) {
+                            if (consecutiveValidTriggerCount >= requiredSamples) {
+                                nextState = AlarmState.TRIGGERED
+                            } else if (consecutiveValidNormalCount >= requiredSamples) {
+                                nextState = AlarmState.NORMAL
+                            } else if (consecutiveValidApproachingCount >= requiredSamples) {
+                                nextState = AlarmState.APPROACHING
+                            }
+                        } else {
+                            // Even in cooldown, we can transition to NORMAL or APPROACHING if RSSI drops
+                            if (consecutiveValidNormalCount >= requiredSamples) {
+                                nextState = AlarmState.NORMAL
+                            } else if (consecutiveValidApproachingCount >= requiredSamples) {
+                                nextState = AlarmState.APPROACHING
+                            }
+                        }
+                    }
+                }
+
+                if (nextState != prevState) {
+                    _uiState.update { it.copy(currentAlarmState = nextState) }
+                    alarmEngine.setAlarmState(nextState)
+                }
+            }
+        }
+
+        // Hysteresis delta check:
+        val isAlreadyAlerting = _uiState.value.activeDeviceAlerts.any { it.id == targetId }
+        
+        val rssiThreshold = if (isAlreadyAlerting) {
+            baseRssiThreshold - 3 // 3 dB hysteresis delta to clear alert
+        } else {
+            baseRssiThreshold // Normal threshold to trigger alert
+        }
+        
+        val distanceThreshold = if (isAlreadyAlerting) {
+            baseDistanceThreshold + 0.5f // 0.5 meters hysteresis delta to clear alert
+        } else {
+            baseDistanceThreshold // Normal threshold to trigger alert
+        }
+
+        val isBreach = smoothedDistance < distanceThreshold
         val isRssiAlert = smoothedRssi >= rssiThreshold && _uiState.value.isRssiAlertEnabled
 
         val isWhitelisted = _uiState.value.baselineWhitelistedMacs.contains(smoothedBlip.id)
@@ -618,10 +1053,33 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val magBaseline = _uiState.value.baselineMagneticFluxMicroTesla
         val isMagAnomaly = smoothedBlip.type == "MAGNETIC" && magBaseline != null && Math.abs(-smoothedBlip.rssi - magBaseline) > 25.0f
 
+        val shouldAlert = (isBreach || isRssiAlert || smoothedBlip.isHighRiskVendor || isMagAnomaly) && 
+                _uiState.value.isPerimeterAlarmEnabled && 
+                !_uiState.value.stealthModeEnabled
+
         if (isWhitelisted) {
             // Suppress alerts for whitelist
-        } else if ((isBreach || isRssiAlert || smoothedBlip.isHighRiskVendor || isMagAnomaly) && _uiState.value.isPerimeterAlarmEnabled && !_uiState.value.stealthModeEnabled) {
-            alarmEngine.triggerProximityAlert()
+        } else if (shouldAlert) {
+            val now = System.currentTimeMillis()
+            val alertType = when {
+                isBreach -> "BREACH"
+                isRssiAlert -> "RSSI"
+                smoothedBlip.isHighRiskVendor -> "VENDOR"
+                else -> "MAGNETIC"
+            }
+            
+            // Clean up history older than 30s
+            triggeredAlertHistory.removeAll { now - it.timestamp > 30000L }
+            
+            // Check if duplicate alert for same condition/type within last 15s (Goal 5)
+            val isDuplicate = triggeredAlertHistory.any { 
+                it.deviceId == targetId && it.alertType == alertType && now - it.timestamp < 15000L 
+            }
+            
+            if (!isDuplicate) {
+                triggeredAlertHistory.add(TriggeredAlertRecord(targetId, alertType, now))
+                alarmEngine.triggerProximityAlert()
+            }
         }
 
         historyLogger.logSignalEntry(
@@ -631,48 +1089,159 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             freqMhz = smoothedBlip.frequencyMhz,
             isBreach = isBreach
         )
+        
+        rfEventRecorderEngine.processObservations(listOf(smoothedBlip), _uiState.value.selectedTargetDeviceId)
+
 
         val now = System.currentTimeMillis()
-        if (now - lastBlipUiUpdateMs >= 65L) {
+        if (now - lastBlipUiUpdateMs >= 100L) { // Throttle to 10Hz (100ms) for UI stability and 60fps rendering (Goal 10)
             lastBlipUiUpdateMs = now
             val blipsList = blipMap.values.toList()
             val nearest = blipsList.minByOrNull { it.distance }
 
             val targetDeviceId = _uiState.value.selectedTargetDeviceId
             val targetBlip = if (targetDeviceId != null) {
-                blipsList.find { it.id == targetDeviceId || it.name == targetDeviceId } ?: nearest
+                blipsList.find { it.id == targetDeviceId || it.name == targetDeviceId }
             } else {
-                nearest
+                // Feature 26: If no target selected, do not track unless explicitly desired. But the instructions say:
+                // "If no device is selected: sonar remains disabled or inactive."
+                null
             }
 
-            targetBlip?.let {
-                if (_uiState.value.isAudioSonarActive) {
-                    audioTracker.updateProximityDistance(it.distance.toDouble())
+            if (_uiState.value.isAudioSonarActive) {
+                if (targetBlip != null) {
+                    audioTracker.updateProximityDistance(targetBlip.distance.toDouble())
+                } else {
+                    // Send -1 to indicate unavailable or idle
+                    audioTracker.updateProximityDistance(-1.0)
                 }
             }
 
-            val breaches = blipsList.count { it.distance < threshold }
+            val breaches = blipsList.count { it.distance < _uiState.value.perimeterThresholdMeters }
+
+            val (processedBlips, summary) = baselineEngine.processBaseline(
+                blips = blipsList,
+                fingerprintDb = cachedFingerprints,
+                isLearning = _uiState.value.baselineSummary.isLearning,
+                baselineObservations = cachedBaselineStats.observations,
+                baselineAvgActiveBlips = cachedBaselineStats.avgActiveBlips,
+                baselineAvgFreqOccupancy = cachedBaselineStats.avgFreqOccupancy,
+                baselineStartedAtMs = cachedBaselineStats.startedAtMs
+            )
+            
+
+            val evaluatedBlips = processedBlips.map { blip ->
+                val anomaly = anomalyEngine.evaluateAnomaly(
+                    blip = blip,
+                    fingerprintDb = cachedFingerprints,
+                    baselineSummary = summary
+                )
+                
+                // Historical tracking: Update the database occasionally if score changes significantly
+                blip.fingerprintId?.let { fpId ->
+                    val fp = cachedFingerprints[fpId]
+                    if (fp != null) {
+                        val prevScore = fp.lastAnomalyScore ?: 0
+                        if (kotlin.math.abs(prevScore - anomaly.score) > 10) {
+                            val updatedFp = fp.copy(lastAnomalyScore = anomaly.score, lastAnomalyConfidence = anomaly.confidence)
+                            cachedFingerprints = cachedFingerprints + (fpId to updatedFp) // Update local cache
+                            if (_uiState.value.operatingMode == OperatingMode.LIVE) {
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    bleDatabase.signalFingerprintDao().updateFingerprint(updatedFp.toEntity())
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                blip.copy(anomalyResult = anomaly)
+            }
+
+            if (_uiState.value.baselineSummary.isLearning && _uiState.value.operatingMode == OperatingMode.LIVE) {
+                // Update running averages
+                val currentObs = cachedBaselineStats.observations + 1
+                val newAvgBlips = cachedBaselineStats.avgActiveBlips + ((evaluatedBlips.size - cachedBaselineStats.avgActiveBlips) / currentObs)
+                val currentFreq = evaluatedBlips.sumOf { (it.bandwidthMhz ?: 20.0) }.toFloat()
+                val newAvgFreq = cachedBaselineStats.avgFreqOccupancy + ((currentFreq - cachedBaselineStats.avgFreqOccupancy) / currentObs)
+                viewModelScope.launch {
+                    settingsDataStore.updateBaselineStats(currentObs, newAvgBlips, newAvgFreq)
+                }
+            }
+            
+            // Dispatch to mapping engine (background)
+            viewModelScope.launch(Dispatchers.Default) {
+                environmentMappingEngine.updateMap(
+                    blips = evaluatedBlips,
+                    headingDegrees = _uiState.value.headingDegrees,
+                    userX = 0f, 
+                    userY = 0f
+                )
+                
+                val sessionId = rfSessionEngine.getActiveSessionId()
+                if (sessionId != null) {
+                    deviceIdentityEngine.processObservations(evaluatedBlips, cachedFingerprints, sessionId)
+                    rfAnomalyEngine.processEvents(evaluatedBlips, sessionId, environmentMappingEngine.mapState.value, deviceIdentityEngine.hypotheses.value)
+                    rfPatternEngine.processEvents(evaluatedBlips, sessionId)
+                    viewModelScope.launch { rfIntelligenceEngine.updateGraph() }
+                    
+                    rfSessionEngine.updateSessionStats(
+                        eventCount = rfEventRecorderEngine.recorderState.value.totalRecordedEventsSession,
+                        anomalyCount = rfAnomalyEngine.anomalies.value.size,
+                        deviceCount = deviceIdentityEngine.hypotheses.value.size,
+                        mapCellCount = environmentMappingEngine.mapState.value.cells.size
+                    )
+                }
+            }
 
             _uiState.update { state ->
                 state.copy(
-                    activeBlips = blipsList,
+                    activeBlips = evaluatedBlips,
                     nearestBlip = nearest,
-                    perimeterBreachCount = breaches
+                    perimeterBreachCount = breaches,
+                    baselineSummary = summary
                 )
             }
+            
+        }
+    }
+
+        fun toggleBaselineLearning() {
+        val currentState = _uiState.value.baselineSummary.isLearning
+        viewModelScope.launch {
+            settingsDataStore.updateBaselineLearningMode(!currentState)
+        }
+    }
+
+    fun resetBaseline() {
+        viewModelScope.launch {
+            settingsDataStore.resetBaseline()
         }
     }
 
     fun setMapRangeMeters(meters: Float) {
-        _uiState.update { it.copy(mapRangeMeters = meters.coerceIn(2.0f, 100.0f)) }
+        val clamped = meters.coerceIn(1.0f, 120.0f)
+        _currentRadarRangeMeters.value = clamped
+        _uiState.update { it.copy(mapRangeMeters = clamped, currentRadarRangeMeters = clamped) }
+    }
+
+    fun setRadarRangeMeters(meters: Float) {
+        setMapRangeMeters(meters)
+    }
+
+    fun setRadarRange(meters: Float) {
+        setMapRangeMeters(meters)
     }
 
     fun zoomInMap() {
-        _uiState.update { it.copy(mapRangeMeters = (it.mapRangeMeters * 0.7f).coerceIn(2.0f, 100.0f)) }
+        val newRange = (_uiState.value.mapRangeMeters * 0.7f).coerceIn(1.0f, 120.0f)
+        _currentRadarRangeMeters.value = newRange
+        _uiState.update { it.copy(mapRangeMeters = newRange, currentRadarRangeMeters = newRange) }
     }
 
     fun zoomOutMap() {
-        _uiState.update { it.copy(mapRangeMeters = (it.mapRangeMeters * 1.4f).coerceIn(2.0f, 100.0f)) }
+        val newRange = (_uiState.value.mapRangeMeters * 1.4f).coerceIn(1.0f, 120.0f)
+        _currentRadarRangeMeters.value = newRange
+        _uiState.update { it.copy(mapRangeMeters = newRange, currentRadarRangeMeters = newRange) }
     }
 
     fun toggleMapMaximized() {
@@ -682,8 +1251,22 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     fun selectTargetDevice(deviceId: String?) {
         _uiState.update { state ->
             val newTarget = if (state.selectedTargetDeviceId == deviceId) null else deviceId
-            state.copy(selectedTargetDeviceId = newTarget)
+            state.copy(
+                selectedTargetDeviceId = newTarget,
+                selectedDeviceId = deviceId,
+                lockedTargetDeviceId = newTarget,
+                currentAlarmState = AlarmState.NORMAL
+            )
         }
+        consecutiveValidTriggerCount = 0
+        consecutiveValidExitCount = 0
+        consecutiveValidNormalCount = 0
+        consecutiveValidApproachingCount = 0
+        alarmCooldownStartTimeMs = 0L
+        alarmHasExitedHysteresis = false
+        lastAlarmTargetId = _uiState.value.selectedTargetDeviceId
+        alarmEngine.setAlarmState(AlarmState.NORMAL)
+
         if (deviceId != null && !_uiState.value.isAudioSonarActive && !_uiState.value.stealthModeEnabled) {
             if (!audioTracker.isAudioActive()) {
                 audioTracker.start()
@@ -692,12 +1275,348 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    /**
+     * Preview/inspect a device blip without changing the persistent locked target.
+     * Passing null clears preview selection while preserving any existing locked target.
+     */
+    fun selectDevice(deviceId: String?) {
+        _uiState.update { it.copy(selectedDeviceId = deviceId) }
+    }
+
+    /**
+     * Explicitly lock a device target for persistent tracking, alerts, and navigation.
+     */
+    fun lockTarget(deviceId: String) {
+        selectTargetDevice(deviceId)
+    }
+
+    /**
+     * Explicitly unlock the active target.
+     */
+    fun unlockTarget() {
+        selectTargetDevice(null)
+    }
+
     fun playTestAudioPing(distanceMeters: Double) {
         audioTracker.playSingleTestPing(distanceMeters)
     }
 
+    
+    fun addMeasurementPoint(point: RfMeasurementPoint) {
+        _uiState.update { state ->
+            val updated = state.measurementHistory.toMutableList()
+            if (updated.size >= 60) {
+                updated.removeAt(0)
+            }
+            updated.add(point)
+            state.copy(measurementHistory = updated)
+        }
+    }
+
+    fun clearMeasurementHistory() {
+        _uiState.update { state ->
+            state.copy(measurementHistory = emptyList())
+        }
+    }
+
+    fun addSpatialPoint(deviceId: String, point: RfMeasurementPoint) {
+        _uiState.update { state ->
+            val currentMap = state.spatialHistoryMap.toMutableMap()
+            val history = currentMap[deviceId]?.toMutableList() ?: mutableListOf()
+            if (history.size >= 60) {
+                history.removeAt(0)
+            }
+            history.add(point)
+            currentMap[deviceId] = history
+            state.copy(spatialHistoryMap = currentMap)
+        }
+        recalculateProbabilityVolume(deviceId)
+    }
+
+    fun recalculateProbabilityVolume(deviceId: String) {
+        val points = _uiState.value.spatialHistoryMap[deviceId] ?: return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val volume = NextBestMeasurementEngine.estimateProbabilityVolume(points, deviceId)
+            _uiState.update { state ->
+                if (state.selectedTargetDeviceId == deviceId) {
+                    state.copy(activeProbabilityVolume = volume)
+                } else {
+                    state
+                }
+            }
+        }
+    }
+
+    private var lastObservedStepCount = -1
+
+    fun updateSurveyStep(stepCount: Int, headingDegrees: Float) {
+        val state = _uiState.value.spatialSurveyState
+        if (!state.isActive || state.isPaused) return
+        
+        if (lastObservedStepCount == -1) {
+            lastObservedStepCount = stepCount
+            return
+        }
+        
+        val deltaSteps = stepCount - lastObservedStepCount
+        if (deltaSteps > 0) {
+            lastObservedStepCount = stepCount
+            val stepLengthMeters = 0.65f * deltaSteps
+            val headingRad = Math.toRadians(headingDegrees.toDouble())
+            val dx = (stepLengthMeters * kotlin.math.sin(headingRad)).toFloat()
+            val dy = (stepLengthMeters * kotlin.math.cos(headingRad)).toFloat()
+            logSurveyPointInVm(state.currentX + dx, state.currentY + dy)
+        }
+    }
+
+    fun startSurvey(targetId: String) {
+        val stepCount = _uiState.value.sensorSuite.stepCount
+        lastObservedStepCount = stepCount
+        _uiState.update { state ->
+            state.copy(
+                spatialSurveyState = SpatialSurveyState(
+                    isActive = true,
+                    targetId = targetId,
+                    stepCountAtStart = stepCount,
+                    currentX = 0f,
+                    currentY = 0f
+                )
+            )
+        }
+    }
+
+    fun pauseSurvey(isPaused: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                spatialSurveyState = state.spatialSurveyState.copy(isPaused = isPaused)
+            )
+        }
+    }
+
+    fun clearSurvey() {
+        _uiState.update { state ->
+            state.copy(
+                spatialSurveyState = state.spatialSurveyState.copy(
+                    points = emptyList(),
+                    distanceWalkedFt = 0f,
+                    guidance = "Walk forward to begin spatial mapping.",
+                    isLocalizationValid = false,
+                    errorMsg = "LOCALIZATION INVALID: Incomplete covariance model. Gather more distinct directional points.",
+                    estimatedX = null,
+                    estimatedY = null,
+                    confidence = 0,
+                    isSpatialCoveragePoor = false,
+                    isSignalWeakening = false,
+                    isSignalUnstable = false,
+                    areaSqFt = 0f,
+                    rssiRangeStr = "0",
+                    signalTrendStr = "CALCULATING"
+                )
+            )
+        }
+    }
+
+    fun endSurvey() {
+        _uiState.update { state ->
+            state.copy(
+                spatialSurveyState = state.spatialSurveyState.copy(isActive = false, targetId = null)
+            )
+        }
+    }
+
+    fun logSurveyPointInVm(x: Float, y: Float, customRssi: Int? = null) {
+        val currentState = _uiState.value
+        val surveyState = currentState.spatialSurveyState
+        if (!surveyState.isActive) return
+
+        val targetId = currentState.selectedTargetDeviceId ?: surveyState.targetId ?: return
+        val target = currentState.activeBlips.find { it.id == targetId || it.name == targetId } ?: return
+
+        // Compute RSSI
+        val rssi = customRssi ?: target.rssi
+
+        // EMA filtered RSSI
+        val prevFiltered = surveyState.points.lastOrNull()?.filteredRssi ?: rssi.toFloat()
+        val filtered = 0.3f * rssi + 0.7f * prevFiltered
+
+        val ts = System.currentTimeMillis()
+        val variance = if (surveyState.points.size <= 1) 4f else {
+            val rssis = surveyState.points.map { it.rssi } + rssi
+            val avg = rssis.average()
+            rssis.map { (it.toDouble() - avg) * (it.toDouble() - avg) }.average().toFloat()
+        }
+
+        val quality = ((100 + rssi).coerceIn(10, 100) * 0.7f + (100f / (1f + variance)).coerceIn(10f, 100f) * 0.3f).toInt()
+        val qState = RfMeasurementPoint.determineQualityState(rssi, variance, quality, ts)
+
+        val newPoint = RfMeasurementPoint(
+            timestamp = ts,
+            latitude = null,
+            longitude = null,
+            xOffsetMeters = x,
+            yOffsetMeters = y,
+            compassHeading = currentState.headingDegrees,
+            pitch = currentState.sensorSuite.pitchDeg,
+            roll = currentState.sensorSuite.rollDeg,
+            rssi = rssi,
+            filteredRssi = filtered,
+            rssiVariance = variance,
+            targetId = target.id,
+            frequencyMhz = target.frequencyMhz,
+            qualityScore = quality,
+            label = "SURVEY",
+            qualityState = qState
+        )
+
+        val updatedPoints = surveyState.points + newPoint
+
+        // Calculate total distance
+        var distanceWalkedMeters = surveyState.distanceWalkedFt / 3.28084f
+        if (surveyState.points.isNotEmpty()) {
+            val lastPt = surveyState.points.last()
+            val dx = x - lastPt.xOffsetMeters
+            val dy = y - lastPt.yOffsetMeters
+            distanceWalkedMeters += kotlin.math.sqrt(dx * dx + dy * dy)
+        }
+
+        // Compute Spatial Spread / Coverage
+        var maxDistance = 0.0f
+        for (i in updatedPoints.indices) {
+            for (j in i + 1 until updatedPoints.size) {
+                val dx = updatedPoints[i].xOffsetMeters - updatedPoints[j].xOffsetMeters
+                val dy = updatedPoints[i].yOffsetMeters - updatedPoints[j].yOffsetMeters
+                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                if (dist > maxDistance) {
+                    maxDistance = dist
+                }
+            }
+        }
+
+        val isSpatialCoveragePoor = updatedPoints.size >= 2 && maxDistance < 4.0f // ~13 ft
+
+        // Signal Trend
+        val slope = if (updatedPoints.size >= 3) {
+            val n = updatedPoints.size.toDouble()
+            val sumI = (0 until updatedPoints.size).sum().toDouble()
+            val sumI2 = (0 until updatedPoints.size).sumOf { it * it }.toDouble()
+            val sumR = updatedPoints.sumOf { it.filteredRssi.toDouble() }
+            val sumIR = updatedPoints.mapIndexed { idx, pt -> idx * pt.filteredRssi.toDouble() }.sum()
+            val denom = n * sumI2 - sumI * sumI
+            if (kotlin.math.abs(denom) < 1e-5) 0.0 else (n * sumIR - sumI * sumR) / denom
+        } else {
+            0.0
+        }
+        val signalTrendStr = when {
+            updatedPoints.size < 3 -> "CALCULATING"
+            slope > 0.4 -> "RISING"
+            slope < -0.4 -> "FALLING"
+            else -> "STABLE"
+        }
+
+        val isSignalWeakening = updatedPoints.isNotEmpty() && (
+            signalTrendStr == "FALLING" || (newPoint.rssi < (updatedPoints.map { it.rssi }.maxOrNull() ?: -120) - 8)
+        )
+        val isSignalUnstable = updatedPoints.size >= 3 && variance > 12.0f
+
+        // Estimate probability volume and run trilateration math
+        val surveyVolume = if (updatedPoints.size >= 5) {
+            NextBestMeasurementEngine.estimateProbabilityVolume(updatedPoints, target.id)
+        } else null
+
+        val isLocalizationValid = updatedPoints.size >= 5 && surveyVolume != null && surveyVolume.isValid && !surveyVolume.insufficientSpatialDiversity
+
+        // UI Guidance logic
+        val guidance = when {
+            updatedPoints.size < 5 -> "Walk forward to gather more measurements (Need ${5 - updatedPoints.size} more points)."
+            !isLocalizationValid && isSpatialCoveragePoor -> "Widen Survey Area: Step at wider displacements (at least 15 ft span)."
+            !isLocalizationValid -> "Localization Invalid: Incomplete covariance model. Gather more distinct directional points."
+            else -> "Localization Solid: Physical target coordinate successfully resolved."
+        }
+
+        val errorMsg = if (isLocalizationValid) null else {
+            if (isSpatialCoveragePoor) "WIDEN SURVEY AREA: Step at wider displacements (at least 15 ft span) to establish covariance."
+            else "LOCALIZATION INVALID: Incomplete covariance model. Gather more distinct directional points."
+        }
+
+        val estimatedX = if (isLocalizationValid && surveyVolume != null) surveyVolume.sourcePosition.x else null
+        val estimatedY = if (isLocalizationValid && surveyVolume != null) surveyVolume.sourcePosition.y else null
+
+        val rMeters = surveyVolume?.radiusMeters ?: 15f
+        val confidence = if (isLocalizationValid) {
+            (100f - (rMeters * 8f)).coerceIn(10f, 98f).toInt()
+        } else 0
+
+        val xOffsets = updatedPoints.map { it.xOffsetMeters }
+        val yOffsets = updatedPoints.map { it.yOffsetMeters }
+        val minX = xOffsets.minOrNull() ?: 0f
+        val maxX = xOffsets.maxOrNull() ?: 0f
+        val minY = yOffsets.minOrNull() ?: 0f
+        val maxY = yOffsets.maxOrNull() ?: 0f
+        val areaSqFt = (maxX - minX) * (maxY - minY) * 10.7639f
+
+        val rssis = updatedPoints.map { it.rssi }
+        val minRssi = rssis.minOrNull() ?: -120
+        val maxRssi = rssis.maxOrNull() ?: -30
+        val rssiRangeStr = "$minRssi to $maxRssi dBm"
+
+        _uiState.update { state ->
+            state.copy(
+                spatialSurveyState = surveyState.copy(
+                    points = updatedPoints,
+                    distanceWalkedFt = distanceWalkedMeters * 3.28084f,
+                    currentX = x,
+                    currentY = y,
+                    guidance = guidance,
+                    isLocalizationValid = isLocalizationValid,
+                    errorMsg = errorMsg,
+                    estimatedX = estimatedX,
+                    estimatedY = estimatedY,
+                    confidence = confidence,
+                    isSpatialCoveragePoor = isSpatialCoveragePoor,
+                    isSignalWeakening = isSignalWeakening,
+                    isSignalUnstable = isSignalUnstable,
+                    areaSqFt = areaSqFt,
+                    rssiRangeStr = rssiRangeStr,
+                    signalTrendStr = signalTrendStr
+                )
+            )
+        }
+    }
+
+    fun setSelectedTargetDeviceId(id: String?) {
+        _uiState.update { it.copy(selectedTargetDeviceId = id) }
+        
+    }
+    
     fun setTab(tab: RadarTab) {
         _uiState.update { it.copy(selectedTab = tab) }
+    }
+
+    fun setViewMode(mode: ViewMode) {
+        _viewMode.value = mode
+        _uiState.update { it.copy(viewMode = mode) }
+    }
+
+    fun testGeminiConnection() {
+        viewModelScope.launch {
+            geminiThreatService.testConnection()
+        }
+    }
+
+    fun runNetworkConnectivityAndSpeedTest() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(networkSpeedTestResult = "TESTING...") }
+            val success = geminiThreatService.checkNetworkSpeed()
+            _uiState.update { state ->
+                state.copy(
+                    networkSpeedTestResult = if (success) {
+                        "SUCCESS: Connectivity and latency verified (HTTP 204 response)."
+                    } else {
+                        "FAIL: Connectivity check timed out or failed."
+                    }
+                )
+            }
+        }
     }
 
     fun setFilterType(type: String) {
@@ -831,6 +1750,78 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         } catch (_: Exception) {}
     }
 
+
+
+    fun injectSimulationBlip(blip: RadarBlip) {
+        if (_uiState.value.operatingMode != OperatingMode.SIMULATION) return
+        processSignalIntercept(blip)
+    }
+
+    
+    fun clearReplayState() {
+        _uiState.update { it.copy(activeBlips = emptyList(), selectedTargetDeviceId = null) }
+        // reset environment map if applicable
+    }
+
+    fun reconstructStateFromEvents(validEvents: List<RfRecordedEventEntity>) {
+        if (_uiState.value.operatingMode != OperatingMode.REPLAY) return
+        
+        // Find the latest state for each device
+        val latestDeviceEvents = validEvents.groupBy { it.deviceId }
+            .mapValues { it.value.maxByOrNull { e -> e.timestampMs } }
+            .values.filterNotNull()
+            
+        // Filter out devices that haven't been seen recently (e.g. within 30 seconds of the seek target)
+        // For replay scrubbing, we just take the last known state, but realistically we should age them out
+        val seekTargetMs = validEvents.lastOrNull()?.timestampMs ?: 0L
+        val activeDeviceEvents = latestDeviceEvents.filter { seekTargetMs - it.timestampMs < 30000 }
+        
+        val reconstructedBlips = activeDeviceEvents.map { entity ->
+            val anomalyResult = if (entity.anomalyScore != null || entity.classification != null) {
+                AnomalyResult(
+                    score = entity.anomalyScore?.toInt() ?: 0,
+                    confidence = entity.classificationConfidence ?: 0f,
+                    explanations = if (entity.classification != null) listOf(AnomalyExplanation(entity.classification, 1)) else emptyList()
+                )
+            } else null
+            
+            RadarBlip(
+                id = entity.deviceId,
+                name = entity.manufacturerInfo ?: "Unknown Replay Device",
+                distance = entity.distanceMeters ?: 0f,
+                targetAngleOffset = 0f,
+                type = entity.signalType,
+                rssi = entity.rssi,
+                frequencyMhz = entity.frequencyMhz,
+                bandLabel = entity.bandLabel,
+                anomalyResult = anomalyResult,
+                provenance = DataProvenance.REPLAY,
+                timestampMs = entity.timestampMs
+            )
+        }
+        
+        _uiState.update { it.copy(activeBlips = reconstructedBlips) }
+    }
+
+    fun injectReplayBlip(blip: RadarBlip) {
+        if (_uiState.value.operatingMode != OperatingMode.REPLAY) return
+        processSignalIntercept(blip)
+    }
+
+    fun setOperatingMode(mode: OperatingMode) {
+        _uiState.update { it.copy(operatingMode = mode) }
+        
+        // Reset or swap isolated context if needed
+        if (mode == OperatingMode.LIVE) {
+            // Restore live context
+            anomalyEngine.resetIsolatedState()
+            correlationEngine.resetIsolatedState()
+        } else {
+            // Enter isolated context
+            anomalyEngine.isolateStateForSimulation()
+            correlationEngine.isolateStateForSimulation()
+        }
+    }
     fun toggleBleScannerService() {
         val next = !_uiState.value.isBleScannerServiceActive
         if (next) {
@@ -864,6 +1855,30 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 stealthModeEnabled = if (isStealth) true else state.stealthModeEnabled,
                 isAudioSonarActive = if (isStealth) false else state.isAudioSonarActive
             )
+        }
+    }
+
+    fun setAiInferenceMode(mode: AiInferenceMode) {
+        viewModelScope.launch {
+            settingsDataStore.updateAiInferenceMode(mode)
+        }
+    }
+
+    fun saveGeminiApiKey(key: String) {
+        viewModelScope.launch {
+            val credStore = AiCredentialStore.getInstance(getApplication())
+            credStore.setGeminiApiKey(key)
+            _uiState.update { it.copy(geminiApiKeyExists = true) }
+            testGeminiConnection()
+        }
+    }
+
+    fun clearGeminiApiKey() {
+        viewModelScope.launch {
+            val credStore = AiCredentialStore.getInstance(getApplication())
+            credStore.clearGeminiApiKey()
+            _uiState.update { it.copy(geminiApiKeyExists = false) }
+            _uiState.update { it.copy(geminiConnectionState = GeminiConnectionState.NotConfigured) }
         }
     }
 
@@ -913,38 +1928,50 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun startBackgroundAlertService() {
-        val app = getApplication<Application>()
-        val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
-            action = ScannerBackgroundAlertService.ACTION_START_SERVICE
-            putExtra(ScannerBackgroundAlertService.EXTRA_RSSI_THRESHOLD, _uiState.value.rssiAlertThresholdDbm)
-            putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_HAPTIC, _uiState.value.isHapticAlertsEnabled)
-            putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_NOTIF, _uiState.value.isVisualNotifsEnabled)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            app.startForegroundService(intent)
-        } else {
-            app.startService(intent)
-        }
-    }
-
-    private fun stopBackgroundAlertService() {
-        val app = getApplication<Application>()
-        val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
-            action = ScannerBackgroundAlertService.ACTION_STOP_SERVICE
-        }
-        app.startService(intent)
-    }
-
-    private fun updateBackgroundAlertServiceSettings() {
-        if (_uiState.value.isBackgroundAlertServiceActive) {
+        try {
             val app = getApplication<Application>()
             val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
-                action = ScannerBackgroundAlertService.ACTION_UPDATE_SETTINGS
+                action = ScannerBackgroundAlertService.ACTION_START_SERVICE
                 putExtra(ScannerBackgroundAlertService.EXTRA_RSSI_THRESHOLD, _uiState.value.rssiAlertThresholdDbm)
                 putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_HAPTIC, _uiState.value.isHapticAlertsEnabled)
                 putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_NOTIF, _uiState.value.isVisualNotifsEnabled)
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                app.startForegroundService(intent)
+            } else {
+                app.startService(intent)
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("SignalRadarViewModel", "Could not start ScannerBackgroundAlertService: ${e.message}")
+        }
+    }
+
+    private fun stopBackgroundAlertService() {
+        try {
+            val app = getApplication<Application>()
+            val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
+                action = ScannerBackgroundAlertService.ACTION_STOP_SERVICE
+            }
             app.startService(intent)
+        } catch (e: Throwable) {
+            android.util.Log.w("SignalRadarViewModel", "Could not stop ScannerBackgroundAlertService: ${e.message}")
+        }
+    }
+
+    private fun updateBackgroundAlertServiceSettings() {
+        if (_uiState.value.isBackgroundAlertServiceActive) {
+            try {
+                val app = getApplication<Application>()
+                val intent = Intent(app, ScannerBackgroundAlertService::class.java).apply {
+                    action = ScannerBackgroundAlertService.ACTION_UPDATE_SETTINGS
+                    putExtra(ScannerBackgroundAlertService.EXTRA_RSSI_THRESHOLD, _uiState.value.rssiAlertThresholdDbm)
+                    putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_HAPTIC, _uiState.value.isHapticAlertsEnabled)
+                    putExtra(ScannerBackgroundAlertService.EXTRA_ENABLE_NOTIF, _uiState.value.isVisualNotifsEnabled)
+                }
+                app.startService(intent)
+            } catch (e: Throwable) {
+                android.util.Log.w("SignalRadarViewModel", "Could not update ScannerBackgroundAlertService: ${e.message}")
+            }
         }
     }
 
@@ -1153,6 +2180,35 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         historyLogger.logSignalEntry("EXPOSED_CSV_EXPORT_INITIATED", 0f, "SYSTEM", 0.0, false)
     }
 
+
+    fun exportRfEventsJson(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val jsonData = rfEventRecorderEngine.generateJsonExport(_uiState.value, deviceIdentityEngine.hypotheses.value.values.toList(), rfAnomalyEngine.anomalies.value, rfPatternEngine.patterns.value, rfSessionEngine.allSessions.firstOrNull(), db.rfAnnotationDao().getAnnotationsBySessionId(rfSessionEngine.getActiveSessionId() ?: "").firstOrNull())
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(jsonData.toByteArray())
+                }
+                Toast.makeText(context, "Successfully exported Investigation JSON!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to write JSON: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun exportRfEventsCsv(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val csvData = rfEventRecorderEngine.generateCsvExport()
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(csvData.toByteArray())
+                }
+                Toast.makeText(context, "Successfully exported Investigation CSV!", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to write CSV: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     fun exportGpsBreadcrumbsKml() {
         historyLogger.logSignalEntry("EXPOSED_KML_WARDRIVING_BREADCRUMBS_EXPORT", 0f, "GPS", 0.0, false)
     }
@@ -1260,6 +2316,42 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         clearBleDatabaseLogs()
     }
 
+
+    fun captureEvidencePackage(targetBlip: RadarBlip? = null): AiEvidencePackage {
+        val currentState = _uiState.value
+        
+        val hardwareCaps = mutableListOf<String>()
+        
+        hardwareCaps.add("BLE Scanner")
+        hardwareCaps.add("Magnetometer")
+        hardwareCaps.add("Audio/Ultrasonic Mic")
+        
+        val baseline = currentState.baselineSummary
+        val baselineSummary = "Environment Baseline: ${baseline.knownFingerprints} known, ${baseline.newFingerprints} new"
+        
+        val obs = if (targetBlip != null) listOf(targetBlip) else currentState.activeBlips.toList()
+        
+        val correlations = currentState.correlationEvents
+            .map { "Correlation: ${it.notes} (Score: ${it.correlationScore}, Confidence: ${it.confidence})" }
+
+        return AiEvidencePackage(
+            observations = obs,
+            baselineSummary = baselineSummary,
+            anomalyScore = (currentState.activeBlips.maxOfOrNull { it.anomalyResult?.score ?: 0 } ?: 0).toFloat(),
+            anomalyConfidence = currentState.activeBlips.mapNotNull { it.anomalyResult?.confidence }.average().toFloat().takeIf { !it.isNaN() } ?: 0f,
+            anomalyExplanations = currentState.activeBlips.flatMap { it.anomalyResult?.explanations?.map { e -> e.description } ?: emptyList() },
+            correlations = correlations,
+            timestampsMs = System.currentTimeMillis(),
+            locationUncertainty = LocalizationConfidence.MEDIUM,
+            hardwareCapabilities = hardwareCaps,
+            calibrationState = "Calibrated", // Simplified
+            provenance = if ((obs.any { it.provenance == DataProvenance.SIMULATED })) DataProvenance.SIMULATED else DataProvenance.MEASURED,
+            isLive = !(obs.any { it.provenance == DataProvenance.REPLAY }) && !(obs.any { it.provenance == DataProvenance.SIMULATED }),
+            isSimulation = (obs.any { it.provenance == DataProvenance.SIMULATED }),
+            isReplay = (obs.any { it.provenance == DataProvenance.REPLAY })
+        )
+    }
+
     fun captureRfSnapshot(): RfEnvironmentSnapshot {
         val state = _uiState.value
         return RfEnvironmentSnapshot(
@@ -1315,6 +2407,34 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         _uiState.update { it.copy(isAiDeepAuditDialogOpen = false) }
     }
 
+
+    fun runAiInvestigator(query: String? = null) {
+        _uiState.update { it.copy(isAiAnalyzingThreats = true) }
+        viewModelScope.launch {
+            val pkg = captureEvidencePackage()
+            val assessment = geminiThreatService.runEvidenceInvestigator(pkg, query)
+            _uiState.update { 
+                it.copy(
+                    investigatorAssessment = assessment,
+                    isAiAnalyzingThreats = false
+                )
+            }
+        }
+    }
+
+    fun saveAiInterpretation() {
+        _uiState.update { state ->
+            state.investigatorAssessment?.let { assessment ->
+                val newInterpretation = AiInterpretation(
+                    assessment = assessment,
+                    confidence = assessment.confidence,
+                    operatingMode = state.operatingMode
+                )
+                state.copy(savedInterpretations = state.savedInterpretations + newInterpretation)
+            } ?: state
+        }
+    }
+
     fun runAiThreatAnalysis() {
         runAiDeepAudit(openModal = false)
     }
@@ -1332,8 +2452,9 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         viewModelScope.launch {
-            val snapshot = captureRfSnapshot()
-            val answer = geminiThreatService.askTacticalCopilot(query, snapshot, updatedList)
+            val pkg = captureEvidencePackage()
+            val answer = geminiThreatService.askTacticalCopilot(query, pkg, updatedList)
+
             val modelMsg = TacticalCopilotMessage(
                 isUser = false, 
                 text = answer,
@@ -1493,6 +2614,17 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+
+    fun resumeInvestigationSession(sessionId: String) {
+        viewModelScope.launch {
+            rfSessionEngine.resumeSession(sessionId)
+            val id = rfSessionEngine.getActiveSessionId()
+            if (id != null) {
+                deviceIdentityEngine.loadHypothesesForSession(id)
+            }
+        }
+    }
+    
     override fun onCleared() {
         super.onCleared()
         signalProvider.stopInterception()
@@ -1503,11 +2635,17 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         hardwareSensorSuiteManager?.stopListening()
         audioTracker.stop()
 
+        // Clean up RF Acquisition Layer components
+        wifiDiscoveryScanner.stopScanning()
+        bleDiscoveryScanner.stopScanning()
+        targetRangingEngine.stopRangingSession()
+
         uwbEngine.stopRangingEngine()
         wifiRttAwareManager.stopRttAwareEngine()
         bleTrackerEngine.stopTrackerEngine()
         cellularTelephonyManager.stopTelephonyEngine()
         ultrasonicAudioInterceptor.stopInterceptor()
         usbSdrManager.releaseReceiver()
+        alarmEngine.release()
     }
 }
