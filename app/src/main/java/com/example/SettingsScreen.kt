@@ -58,11 +58,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -87,6 +85,7 @@ fun SettingsScreen(
     onToggleSmoothingLerp: (Boolean) -> Unit,
     onToggleHapticAlerts: (Boolean) -> Unit,
     onToggleVisualNotifs: (Boolean) -> Unit,
+    onToggleRealOnlyMode: (Boolean) -> Unit = {},
     onSetScanMode: (ScanMode) -> Unit,
     onExportLogsCsv: () -> Unit = {},
     onExportKmlBreadcrumbs: () -> Unit = {},
@@ -346,6 +345,38 @@ fun SettingsScreen(
                                 checkedTrackColor = Color(0xFF00FF66)
                             ),
                             modifier = Modifier.testTag("settings_lerp_switch")
+                        )
+                    }
+
+                    // Real-Only Signal Mode Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Real-Only Signal Mode",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Filter out all synthetic or simulated RF signals completely",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = Color.Gray
+                            )
+                        }
+                        Switch(
+                            checked = uiState.isRealOnlyMode,
+                            onCheckedChange = { onToggleRealOnlyMode(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = Color(0xFF00FF66)
+                            ),
+                            modifier = Modifier.testTag("settings_real_only_switch")
                         )
                     }
                 }
@@ -719,7 +750,6 @@ fun SettingsScreen(
                     )
 
                     var apiKeyText by remember { mutableStateOf("") }
-                    var isApiKeyVisible by remember { mutableStateOf(false) }
 
                     OutlinedTextField(
                         value = apiKeyText,
@@ -737,13 +767,13 @@ fun SettingsScreen(
                             fontFamily = FontFamily.Monospace,
                             color = Color.White
                         ),
-                        visualTransformation = if (isApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        visualTransformation = PasswordVisualTransformation(),
                         trailingIcon = {
-                            val icon = if (isApiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff
-                            val description = if (isApiKeyVisible) "Hide password" else "Show password"
-                            IconButton(onClick = { isApiKeyVisible = !isApiKeyVisible }) {
-                                Icon(imageVector = icon, contentDescription = description, tint = Color(0xFF00FF66))
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "API key input is strictly masked and encrypted in Android Keystore",
+                                tint = Color(0xFF00FF66)
+                            )
                         },
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF00FF66),
@@ -751,6 +781,15 @@ fun SettingsScreen(
                             cursorColor = Color(0xFF00FF66)
                         ),
                         singleLine = true
+                    )
+
+                    Text(
+                        text = "API keys are strictly masked and encrypted into hardware Android Keystore (never displayed in plaintext).",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        ),
+                        color = Color.Gray
                     )
 
                     Row(

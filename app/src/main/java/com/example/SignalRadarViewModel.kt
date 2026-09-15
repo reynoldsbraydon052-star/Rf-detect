@@ -120,7 +120,6 @@ enum class RadarGridMode(
 
 enum class RadarTab {
     SWEEP_RADAR,
-    SIMULATION_LAB,
     FULL_RADAR,
     AI_THREAT_ANALYSIS,
     SCANNER,
@@ -135,7 +134,8 @@ enum class RadarTab {
     ENVIRONMENT_MAP,
     IDENTITY_GRAPH,
     INTELLIGENCE_DASHBOARD,
-    ADAPTIVE_LOCALIZATION
+    ADAPTIVE_LOCALIZATION,
+    DEVICE_LOCATOR
 }
 
 enum class ViewMode {
@@ -249,6 +249,7 @@ data class SignalRadarUiState(
     val isFocusModeEnabled: Boolean = false, // When enabled, focuses purely on target device + top 3 nearest priority signals
     val minRssiFilterDbm: Int = -95, // Filter out faint noise signals (< -95 to -50 dBm)
     val isHudDeclutterEnabled: Boolean = true, // Smart decluttering for blip canvas text labels
+    val isRealOnlyMode: Boolean = false, // Filter out synthetic or simulated signals completely
     val sortByPriority: String = "DISTANCE", // "DISTANCE" (Closest First), "RSSI" (Strongest First), "RISK" (Breaches & High Risk First)
     // Gemini AI SIGINT & Threat Intelligence State:
     val threatAnalysisReport: ThreatAnalysisReport? = null,
@@ -298,7 +299,7 @@ data class TriggeredAlertRecord(
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
     
     
-    val simulationEngine = SimulationLabEngine(this)
+
 
 
     private val settingsDataStore = SettingsDataStore(application)
@@ -400,7 +401,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private var hardwareSensorSuiteManager: HardwareSensorSuiteManager? = null
 
     private val kalmanFilters = mutableMapOf<String, KalmanFilter>()
-    private val blipMap = mutableMapOf<String, RadarBlip>()
+    private val blipMap = java.util.concurrent.ConcurrentHashMap<String, RadarBlip>()
     private var cachedFingerprints = mapOf<String, SignalFingerprint>()
     private var cachedBaselineStats: BaselineStats = BaselineStats()
     private var lastBlipUiUpdateMs = 0L
@@ -824,6 +825,9 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private var baselineAltitudeMeters = 0f
 
     private fun processSignalIntercept(rawBlip: RadarBlip) {
+        if (_uiState.value.isRealOnlyMode && rawBlip.provenance == DataProvenance.SIMULATED) {
+            return
+        }
 
 
         val anomaly = anomalyEngine.evaluateAnomaly(rawBlip, cachedFingerprints, _uiState.value.baselineSummary)
@@ -841,8 +845,14 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         val distanceFilter = kalmanFilters.getOrPut("${rawBlip.id}_dist") { KalmanFilter(processNoise = 0.008f, measurementNoise = 0.4f) }
         val rssiFilter = kalmanFilters.getOrPut("${rawBlip.id}_rssi") { KalmanFilter(processNoise = 0.05f, measurementNoise = 1.0f) }
 
-        val smoothedDistance = distanceFilter.update(rawBlip.distance)
+        val basicSmoothedDistance = distanceFilter.update(rawBlip.distance)
         val smoothedRssi = rssiFilter.update(rawBlip.rssi.toFloat()).toInt()
+
+        val smoothedDistance = SignalRangingBridge.getFilteredDistance(
+            macAddress = rawBlip.id,
+            rawRssi = rawBlip.rssi,
+            fallbackDistance = basicSmoothedDistance.toDouble()
+        ).toFloat()
 
         val currentAlt = _uiState.value.sensorSuite.estimatedAltitudeMeters
         if (baselineAltitudeMeters == 0f && currentAlt > 0f) {
@@ -860,17 +870,21 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             estimatedZOffsetMeters = calculatedZOffset
         )
 
-        blipMap[smoothedBlip.id] = smoothedBlip
+        synchronized(blipMap) {
+            blipMap[smoothedBlip.id] = smoothedBlip
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             val fpResult = fingerprintEngine.processObservation(smoothedBlip)
-            val existing = blipMap[smoothedBlip.id]
-            if (existing != null) {
-                blipMap[smoothedBlip.id] = existing.copy(
-                    fingerprintId = fpResult.fingerprint.id,
-                    fingerprintConfidence = fpResult.confidence
-                )
-                _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+            synchronized(blipMap) {
+                val existing = blipMap[smoothedBlip.id]
+                if (existing != null) {
+                    blipMap[smoothedBlip.id] = existing.copy(
+                        fingerprintId = fpResult.fingerprint.id,
+                        fingerprintConfidence = fpResult.confidence
+                    )
+                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                }
             }
 
             // Isolated local AI RAG ingestion (safeguarded to ensure RF scanning never fails)
@@ -894,14 +908,16 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         if (smoothedBlip.ouiVendor == null && rawBlip.id.length >= 8) {
             val localVendor = MacOuidResolver.resolveVendor(rawBlip.id)
             if (localVendor != null) {
-                val existing = blipMap[rawBlip.id]
-                if (existing != null) {
-                    val isHighRisk = localVendor == "Espressif Systems" || localVendor == "Hangzhou Hikvision" || localVendor == "Dahua Technology"
-                    blipMap[rawBlip.id] = existing.copy(
-                        ouiVendor = localVendor,
-                        isHighRiskVendor = isHighRisk
-                    )
-                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                synchronized(blipMap) {
+                    val existing = blipMap[rawBlip.id]
+                    if (existing != null) {
+                        val isHighRisk = localVendor == "Espressif Systems" || localVendor == "Hangzhou Hikvision" || localVendor == "Dahua Technology"
+                        blipMap[rawBlip.id] = existing.copy(
+                            ouiVendor = localVendor,
+                            isHighRiskVendor = isHighRisk
+                        )
+                        _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                    }
                 }
             } else {
                 viewModelScope.launch(Dispatchers.IO) {
@@ -910,13 +926,15 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                         val db = OuiDatabase.getDatabase(getApplication())
                         val ouiData = db.ouiDao().getVendorByPrefix(macPrefix)
                         if (ouiData != null) {
-                            val existing = blipMap[rawBlip.id]
-                            if (existing != null) {
-                                blipMap[rawBlip.id] = existing.copy(
-                                    ouiVendor = ouiData.vendorName,
-                                    isHighRiskVendor = ouiData.isHighRisk
-                                )
-                                _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                            synchronized(blipMap) {
+                                val existing = blipMap[rawBlip.id]
+                                if (existing != null) {
+                                    blipMap[rawBlip.id] = existing.copy(
+                                        ouiVendor = ouiData.vendorName,
+                                        isHighRiskVendor = ouiData.isHighRisk
+                                    )
+                                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+                                }
                             }
                         }
                     }
@@ -1899,6 +1917,18 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     fun toggleHapticAlerts(enabled: Boolean) {
         _uiState.update { it.copy(isHapticAlertsEnabled = enabled) }
         updateBackgroundAlertServiceSettings()
+    }
+
+    fun toggleRealOnlyMode(enabled: Boolean) {
+        _uiState.update { it.copy(isRealOnlyMode = enabled) }
+        if (enabled) {
+            synchronized(blipMap) {
+                val nonSimulatedBlips = blipMap.values.filter { it.provenance != DataProvenance.SIMULATED }
+                blipMap.clear()
+                nonSimulatedBlips.forEach { blipMap[it.id] = it }
+                _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
+            }
+        }
     }
 
     fun toggleVisualNotifs(enabled: Boolean) {

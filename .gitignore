@@ -16,27 +16,6 @@
 local.properties
 .env
 debug.keystore
-
-# Prevent committing build artifacts and sensitive binaries
+*.py
+*.sh
 *.apk
-*.ap_
-*.jks
-*.keystore
-SignalRadar-debug.apk
-
-# Logs, dumps, and generated outputs
-*.log
-*.txt
-gemini_service_dump.txt
-compile_output.txt
-
-# Environment and secrets
-.env.local
-.env.*.local
-
-# IDE
-.idea/
-*.iml
-
-# OS
-.DS_Store

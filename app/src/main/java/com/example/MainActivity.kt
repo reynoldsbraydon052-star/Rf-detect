@@ -634,46 +634,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onRunAiDeepAudit = { viewModel.openAiDeepAuditDialog() }
                         )
 
-                        RadarTab.SIMULATION_LAB -> {
-                            val activeSession by viewModel.replayEngine.activeSession.collectAsStateWithLifecycle()
-                            val savedSessions by viewModel.rfSessionEngine.allSessions.collectAsStateWithLifecycle(initialValue = emptyList())
-                            val replayState by viewModel.replayEngine.replayState.collectAsStateWithLifecycle()
-                            val currentPositionMs by viewModel.replayEngine.currentPositionMs.collectAsStateWithLifecycle()
-                            val playbackSpeed by viewModel.replayEngine.playbackSpeed.collectAsStateWithLifecycle()
-                            val simulationScenario by viewModel.simulationEngine.activeScenario.collectAsStateWithLifecycle()
 
-                            SimulationLabScreen(
-                                uiState = uiState,
-                                replayState = replayState,
-                                simulationScenario = simulationScenario,
-                                activeSession = activeSession,
-                                savedSessions = savedSessions,
-                                currentPositionMs = currentPositionMs,
-                                playbackSpeed = playbackSpeed,
-                                onStartSimulation = { 
-                                    viewModel.setOperatingMode(OperatingMode.SIMULATION)
-                                    viewModel.simulationEngine.startSimulation(it) 
-                                },
-                                onStopSimulation = { 
-                                    viewModel.simulationEngine.stopSimulation()
-                                    viewModel.setOperatingMode(OperatingMode.LIVE)
-                                },
-                                onLoadReplay = { 
-                                    viewModel.setOperatingMode(OperatingMode.REPLAY)
-                                    viewModel.replayEngine.loadSession(it) 
-                                },
-                                onPlayReplay = { viewModel.replayEngine.play() },
-                                onPauseReplay = { viewModel.replayEngine.pause() },
-                                onStopReplay = { viewModel.replayEngine.stopReplay() },
-                                onSeekReplay = { viewModel.replayEngine.seekTo(it) },
-                                onSetPlaybackSpeed = { viewModel.replayEngine.setSpeed(it) },
-                                onReturnToLive = {
-                                    viewModel.simulationEngine.stopSimulation()
-                                    viewModel.replayEngine.stopReplay()
-                                    viewModel.setOperatingMode(OperatingMode.LIVE)
-                                }
-                            )
-                        }
 
                         RadarTab.AI_THREAT_ANALYSIS -> AiThreatIntelScreen(
                             uiState = uiState,
@@ -787,6 +748,12 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onBackToRadar = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
                             viewModel = viewModel
                         )
+                        RadarTab.DEVICE_LOCATOR -> DeviceLocatorScreen(
+                            uiState = uiState,
+                            onSelectTargetDevice = { viewModel.selectTargetDevice(it) },
+                            onBackToRadar = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
+                            viewModel = viewModel
+                        )
                         RadarTab.SETTINGS -> SettingsScreen(
                             uiState = uiState,
                             onBack = { viewModel.setTab(RadarTab.SWEEP_RADAR) },
@@ -798,6 +765,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                             onToggleSmoothingLerp = { viewModel.toggleSmoothingLerpInStore(it) },
                             onToggleHapticAlerts = { viewModel.toggleHapticAlerts(it) },
                             onToggleVisualNotifs = { viewModel.toggleVisualNotifs(it) },
+                            onToggleRealOnlyMode = { viewModel.toggleRealOnlyMode(it) },
                             onSetScanMode = { viewModel.setScanMode(it) },
                             onExportLogsCsv = { viewModel.exportCapturedLogsCsv() },
                             onExportKmlBreadcrumbs = { viewModel.exportGpsBreadcrumbsKml() },
@@ -4115,7 +4083,6 @@ fun BottomRadarNavBar(
                     ) {
                         Icon(
                             imageVector = when (tab) {
-                                RadarTab.SIMULATION_LAB -> Icons.Default.Settings
                                 RadarTab.SWEEP_RADAR -> Icons.Default.Radar
                                 RadarTab.FULL_RADAR -> Icons.Default.Radar
                                 RadarTab.AI_THREAT_ANALYSIS -> Icons.Default.Security
@@ -4132,6 +4099,7 @@ fun BottomRadarNavBar(
                                 RadarTab.SETTINGS -> Icons.Default.Settings
                                 RadarTab.EVENT_RECORDER -> Icons.Default.Info
                                 RadarTab.ADAPTIVE_LOCALIZATION -> Icons.Default.MyLocation
+                                RadarTab.DEVICE_LOCATOR -> Icons.Default.MyLocation
                             },
                             contentDescription = tab.name,
                             tint = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
@@ -4139,7 +4107,6 @@ fun BottomRadarNavBar(
                         )
                         Text(
                             text = when (tab) {
-                                RadarTab.SIMULATION_LAB -> "Lab"
                                 RadarTab.SWEEP_RADAR -> "Sweep"
                                 RadarTab.FULL_RADAR -> "Full Radar"
                                 RadarTab.AI_THREAT_ANALYSIS -> "AI Intel"
@@ -4156,6 +4123,7 @@ fun BottomRadarNavBar(
                                 RadarTab.SETTINGS -> "Settings"
                                 RadarTab.EVENT_RECORDER -> "Rec"
                                 RadarTab.ADAPTIVE_LOCALIZATION -> "Localizer"
+                                RadarTab.DEVICE_LOCATOR -> "Locator"
                             },
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -5543,7 +5511,7 @@ fun HistoricHeatmapScreen(uiState: SignalRadarUiState) {
                 }
             }
         } else {
-            items(filteredHistory, key = { "${it.timestamp}_${it.deviceName}_${it.distanceMeters}" }) { item ->
+            items(filteredHistory) { item ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),

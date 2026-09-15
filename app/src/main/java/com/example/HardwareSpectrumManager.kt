@@ -148,7 +148,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "CELLULAR",
                 rssi = -124 + Random.nextInt(-2, 3),
                 frequencyMhz = 1176.45,
-                bandLabel = "GNSS Dual-Band L5"
+                bandLabel = "GNSS Dual-Band L5",
+                provenance = DataProvenance.SIMULATED
             )
         )
 
@@ -162,7 +163,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "BLE",
                 rssi = -55 + Random.nextInt(-2, 3),
                 frequencyMhz = 6489.6,
-                bandLabel = "UWB IEEE 802.15.4z"
+                bandLabel = "UWB IEEE 802.15.4z",
+                provenance = DataProvenance.SIMULATED
             )
         )
     }
@@ -290,7 +292,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "BLE",
                 rssi = -58 + Random.nextInt(-3, 4),
                 frequencyMhz = 2402.0,
-                bandLabel = "BLE 6.0 Channel Sounding"
+                bandLabel = "BLE 6.0 Channel Sounding",
+                provenance = DataProvenance.SIMULATED
             )
         )
 
@@ -303,7 +306,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "WIFI",
                 rssi = -64 + Random.nextInt(-2, 3),
                 frequencyMhz = 6125.0,
-                bandLabel = "6.0 GHz Wi-Fi 7"
+                bandLabel = "6.0 GHz Wi-Fi 7",
+                provenance = DataProvenance.SIMULATED
             )
         )
 
@@ -316,7 +320,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "CELLULAR",
                 rssi = -78 + Random.nextInt(-4, 4),
                 frequencyMhz = 600.0,
-                bandLabel = "5G NR Low-Band"
+                bandLabel = "5G NR Low-Band",
+                provenance = DataProvenance.SIMULATED
             )
         )
 
@@ -329,7 +334,8 @@ class HardwareSpectrumManager(private val context: Context) {
                 type = "BLE",
                 rssi = -52 + Random.nextInt(-3, 3),
                 frequencyMhz = 2440.0,
-                bandLabel = "BLE 2.4 GHz"
+                bandLabel = "BLE 2.4 GHz",
+                provenance = DataProvenance.SIMULATED
             )
         )
     }
