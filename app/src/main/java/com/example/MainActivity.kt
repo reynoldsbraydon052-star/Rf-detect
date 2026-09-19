@@ -61,6 +61,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -1585,7 +1586,9 @@ fun SweepRadarScreen(
                 shadowElevation = 6.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(2.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     listOf("MAP", "RADAR", "HYBRID").forEach { mode ->
@@ -1594,11 +1597,18 @@ fun SweepRadarScreen(
                             onClick = { onViewModeChanged(ViewMode.valueOf(mode)) },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isSelected) Color(0xFF00FF66) else Color.Transparent,
-                            modifier = Modifier.height(32.dp).width(75.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 36.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Text(
                                     text = mode,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Black,
                                         fontFamily = FontFamily.Monospace,
@@ -1746,11 +1756,14 @@ fun SweepRadarScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "DETECTED DEVICES IN RANGE (${filteredBlips.size})",
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
@@ -1761,6 +1774,8 @@ fun SweepRadarScreen(
                     )
                     Text(
                         text = "TAP TO LOCK TARGET",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                             fontSize = 8.sp,
@@ -2545,7 +2560,8 @@ fun FloatingDockIcon(
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.widthIn(min = 54.dp, max = 80.dp)
     ) {
         Surface(
             onClick = onClick,
@@ -2563,6 +2579,18 @@ fun FloatingDockIcon(
                 )
             }
         }
+
+        Text(
+            text = label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold
+            ),
+            color = if (isActive) activeColor else Color(0xFF00FF66).copy(alpha = 0.85f)
+        )
     }
 }
 
