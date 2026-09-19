@@ -46,38 +46,16 @@ fun DeviceLocatorScreen(
     val activeBlips = uiState.activeBlips
     val selectedTargetId = uiState.selectedTargetDeviceId ?: uiState.selectedDeviceId
 
-    // Find our currently selected target
     val targetBlip = remember(activeBlips, selectedTargetId) {
         activeBlips.find { it.id == selectedTargetId || it.name == selectedTargetId }
     }
 
-    // Interactive simulator walk offset to let the user "walk" on the emulator
-    var simulatorWalkOffset by remember { mutableStateOf(0f) } // -10m to +10m offset
-    var isSimulationModeEnabled by remember { mutableStateOf(false) }
-
-    // Computes effective distance and RSSI, blending live values with simulation tweaks if enabled
-    val effectiveRssi = remember(targetBlip, isSimulationModeEnabled, simulatorWalkOffset) {
-        if (targetBlip == null) -100 else {
-            if (isSimulationModeEnabled) {
-                // Closer walk offset = stronger RSSI
-                val baseRssi = -60f
-                val walkFactor = simulatorWalkOffset * 3.5f // 3.5 dB per meter walk
-                (baseRssi + walkFactor).coerceIn(-100f, -40f).toInt()
-            } else {
-                targetBlip.rssi
-            }
-        }
+    val effectiveRssi = remember(targetBlip) {
+        targetBlip?.rssi ?: -100
     }
 
-    val effectiveDistance = remember(targetBlip, isSimulationModeEnabled, simulatorWalkOffset) {
-        if (targetBlip == null) 15.0f else {
-            if (isSimulationModeEnabled) {
-                // Base 5 meters, adjusted by walk offset
-                (5.0f - simulatorWalkOffset).coerceIn(0.5f, 25.0f)
-            } else {
-                targetBlip.distance
-            }
-        }
+    val effectiveDistance = remember(targetBlip) {
+        targetBlip?.distance ?: 15.0f
     }
 
     val bearingScanState by (viewModel?.bearingScanState?.collectAsState(ScanState.IDLE) ?: remember { mutableStateOf(ScanState.IDLE) })
@@ -102,21 +80,18 @@ fun DeviceLocatorScreen(
         }
     }
 
-    // Directional indicator tracking (simulated angular deviation)
-    var relativeTargetAngle by remember { mutableStateOf(45f) } // relative to user's face-heading
+    var relativeTargetAngle by remember { mutableStateOf(45f) }
     LaunchedEffect(targetBlip, uiState.headingDegrees, relativeBearingOffset) {
         if (relativeBearingOffset != null) {
             relativeTargetAngle = (relativeBearingOffset + 360f) % 360f
         } else if (targetBlip != null) {
-            // Target angle relative to the phone's heading
             val diff = (targetBlip.targetAngleOffset - uiState.headingDegrees + 360f) % 360f
             relativeTargetAngle = diff
         }
     }
 
-    // Signal Strength Trend tracking (Hot / Cold / Stable)
     var lastRssi by remember { mutableStateOf(effectiveRssi) }
-    var signalTrend by remember { mutableStateOf("STABLE") } // "HOTTER", "COLDER", "STABLE"
+    var signalTrend by remember { mutableStateOf("STABLE") }
     LaunchedEffect(effectiveRssi) {
         if (effectiveRssi > lastRssi) {
             signalTrend = "HOTTER"
@@ -126,7 +101,6 @@ fun DeviceLocatorScreen(
         lastRssi = effectiveRssi
     }
 
-    // Real-Time Audio Sonar Ticker
     var isAudioLocatorEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(isAudioLocatorEnabled, effectiveRssi, bearingScanState, relativeBearingOffset) {
         if (isAudioLocatorEnabled) {
@@ -140,10 +114,10 @@ fun DeviceLocatorScreen(
                     while (isAudioLocatorEnabled) {
                         val isLockedAligned = bearingScanState == ScanState.LOCKED && relativeBearingOffset != null && abs(relativeBearingOffset) <= 12f
                         val delayMs = if (isLockedAligned) {
-                            75L // Geiger fast ticks!
+                            75L
                         } else {
                             val clampedRssi = effectiveRssi.coerceIn(-95, -45)
-                            val ratio = (clampedRssi + 95) / 50f // 0.0 to 1.0
+                            val ratio = (clampedRssi + 95) / 50f
                             (1300 - (ratio * 1150)).toLong().coerceIn(100L, 1400L)
                         }
 
@@ -151,7 +125,6 @@ fun DeviceLocatorScreen(
                         delay(delayMs)
                     }
                 } catch (e: Exception) {
-                    // Ignore
                 } finally {
                     toneGen.release()
                 }
@@ -159,7 +132,6 @@ fun DeviceLocatorScreen(
         }
     }
 
-    // Real-Time Haptic Pulse Loop
     var isHapticLocatorEnabled by remember { mutableStateOf(false) }
     val hapticFeedback = LocalHapticFeedback.current
     LaunchedEffect(isHapticLocatorEnabled, effectiveRssi, bearingScanState, relativeBearingOffset) {
@@ -167,7 +139,7 @@ fun DeviceLocatorScreen(
             while (isHapticLocatorEnabled) {
                 val isLockedAligned = bearingScanState == ScanState.LOCKED && relativeBearingOffset != null && abs(relativeBearingOffset) <= 12f
                 val delayMs = if (isLockedAligned) {
-                    75L // Rapid haptic pings
+                    75L
                 } else {
                     val clampedRssi = effectiveRssi.coerceIn(-95, -45)
                     val ratio = (clampedRssi + 95) / 50f
@@ -180,7 +152,6 @@ fun DeviceLocatorScreen(
         }
     }
 
-    // Radar Concentric Pulsing Animation
     val transition = rememberInfiniteTransition(label = "pulse")
     val pulseProgress by transition.animateFloat(
         initialValue = 0f,
@@ -251,7 +222,6 @@ fun DeviceLocatorScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Target Selector Dropdown / Selection Bar
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1F13)),
                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f)),
@@ -358,7 +328,6 @@ fun DeviceLocatorScreen(
             }
 
             if (targetBlip == null) {
-                // Empty tracking state
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -396,7 +365,6 @@ fun DeviceLocatorScreen(
                     }
                 }
             } else {
-                // active locator display
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF050D08)),
                     border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f)),
@@ -410,7 +378,6 @@ fun DeviceLocatorScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Calculate lock and alignments
                         val isAligned = if (bearingScanState == ScanState.LOCKED && relativeBearingOffset != null) {
                             abs(relativeBearingOffset) <= 12f
                         } else {
@@ -421,7 +388,6 @@ fun DeviceLocatorScreen(
                             if (bearingScanState == ScanState.CALIBRATING_ROTATION) Color(0xFFFFFF00) else Color.Red
                         }
 
-                        // Calibration & Scanner UI Panel
                         AnimatedVisibility(
                             visible = true,
                             enter = fadeIn() + expandVertically(),
@@ -445,7 +411,7 @@ fun DeviceLocatorScreen(
                                         }
                                         OutlinedButton(
                                             onClick = {
-                                                targetBlip?.let {
+                                                targetBlip.let {
                                                     viewModel?.startBearingCalibration(it.id, uiState.headingDegrees)
                                                 }
                                             },
@@ -553,7 +519,6 @@ fun DeviceLocatorScreen(
                                             }
                                         }
 
-                                        // Confidence & Delta indicators plus Re-calibrate action
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -584,12 +549,10 @@ fun DeviceLocatorScreen(
                             }
                         }
 
-                        // Giant Canvas Pulse Radar & Compass pointer
                         Box(
                             modifier = Modifier
                                 .size(240.dp)
                                 .drawBehind {
-                                    // Base grid layout
                                     val center = Offset(size.width / 2f, size.height / 2f)
                                     val radius = size.width / 2f
                                     drawCircle(
@@ -598,7 +561,6 @@ fun DeviceLocatorScreen(
                                         style = Stroke(width = 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f))
                                     )
 
-                                    // Drawing concentric distance lines
                                     for (i in 1..4) {
                                         drawCircle(
                                             color = Color(0xFF00FF66).copy(alpha = 0.05f * i),
@@ -607,7 +569,6 @@ fun DeviceLocatorScreen(
                                         )
                                     }
 
-                                    // Pulsing Sonar waves based on RSSI strength
                                     drawCircle(
                                         color = Color(0xFF00FF66).copy(alpha = (1f - pulseProgress) * 0.45f),
                                         radius = radius * pulseProgress,
@@ -616,11 +577,9 @@ fun DeviceLocatorScreen(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            // Compass / Relative bearing arrow
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val center = Offset(size.width / 2f, size.height / 2f)
                                 rotate(degrees = relativeTargetAngle, pivot = center) {
-                                    // Pointer Line
                                     drawLine(
                                         color = if (isAligned) Color(0xFF00FF66) else Color(0xFF00FF66).copy(alpha = 0.4f),
                                         start = center,
@@ -628,7 +587,6 @@ fun DeviceLocatorScreen(
                                         strokeWidth = 3f
                                     )
 
-                                    // Arrow head
                                     val path = Path().apply {
                                         moveTo(center.x, 12.dp.toPx())
                                         lineTo(center.x - 8.dp.toPx(), 28.dp.toPx())
@@ -642,7 +600,6 @@ fun DeviceLocatorScreen(
                                 }
                             }
 
-                            // Center Digital Readout
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.Center,
@@ -712,12 +669,10 @@ fun DeviceLocatorScreen(
                             }
                         }
 
-                        // Digital Tactical Indicators
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            // RSSI readouts
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1F13)),
                                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.2f)),
@@ -739,7 +694,6 @@ fun DeviceLocatorScreen(
                                 }
                             }
 
-                            // Emitter ID
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0C1F13)),
                                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.2f)),
@@ -762,7 +716,6 @@ fun DeviceLocatorScreen(
                             }
                         }
 
-                        // Toggle Buttons for Audio Sonar Guidance & Haptics
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -815,117 +768,6 @@ fun DeviceLocatorScreen(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold
                                 )
-                            }
-                        }
-
-                        // Simulation / Walking Locomotion Helper Box to verify Hot / Cold in emulator
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1710)),
-                            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.DirectionsWalk,
-                                            contentDescription = null,
-                                            tint = Color(0xFF00FF66),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "WALK LOCOMOTION SIMULATOR",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = Color.White,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                    }
-                                    Switch(
-                                        checked = isSimulationModeEnabled,
-                                        onCheckedChange = { isSimulationModeEnabled = it },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color.Black,
-                                            checkedTrackColor = Color(0xFF00FF66)
-                                        ),
-                                        modifier = Modifier.testTag("locator_simulation_toggle")
-                                    )
-                                }
-
-                                Text(
-                                    text = "Simulates physical walking actions in the browser emulator environment to verify Hot/Cold signal gradient changes.",
-                                    fontSize = 9.sp,
-                                    color = Color.Gray,
-                                    fontFamily = FontFamily.Monospace
-                                )
-
-                                AnimatedVisibility(visible = isSimulationModeEnabled) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Divider(color = Color(0xFF00FF66).copy(alpha = 0.15f))
-                                        
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = "Position: " + if (simulatorWalkOffset >= 0f) String.format("%.1f m closer", simulatorWalkOffset) else String.format("%.1f m further", -simulatorWalkOffset),
-                                                color = Color(0xFF00FF66),
-                                                fontSize = 10.sp,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                            Text(
-                                                text = "Max proximity limit: 5m",
-                                                color = Color.Gray,
-                                                fontSize = 9.sp,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        }
-
-                                        Slider(
-                                            value = simulatorWalkOffset,
-                                            onValueChange = { simulatorWalkOffset = it },
-                                            valueRange = -4f..4.5f,
-                                            colors = SliderDefaults.colors(
-                                                thumbColor = Color(0xFF00FF66),
-                                                activeTrackColor = Color(0xFF00FF66),
-                                                inactiveTrackColor = Color(0xFF0B2114)
-                                            ),
-                                            modifier = Modifier.testTag("locator_slider")
-                                        )
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            OutlinedButton(
-                                                onClick = {
-                                                    simulatorWalkOffset = (simulatorWalkOffset + 0.5f).coerceIn(-4f, 4.5f)
-                                                },
-                                                modifier = Modifier.weight(1f),
-                                                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f))
-                                            ) {
-                                                Text("Step Closer", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color.White)
-                                            }
-
-                                            OutlinedButton(
-                                                onClick = {
-                                                    simulatorWalkOffset = (simulatorWalkOffset - 0.5f).coerceIn(-4f, 4.5f)
-                                                },
-                                                modifier = Modifier.weight(1f),
-                                                border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.3f))
-                                            ) {
-                                                Text("Step Away", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color.White)
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
