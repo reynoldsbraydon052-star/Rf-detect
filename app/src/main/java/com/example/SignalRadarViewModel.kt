@@ -258,6 +258,7 @@ data class SignalRadarUiState(
     val savedInterpretations: List<AiInterpretation> = emptyList(),
 
     val isAiAnalyzingThreats: Boolean = false,
+    val isInvestigatorLoading: Boolean = false,
     val isAiDeepAuditDialogOpen: Boolean = false,
     val copilotMessages: List<TacticalCopilotMessage> = emptyList(),
     val isCopilotThinking: Boolean = false,
@@ -297,6 +298,9 @@ data class TriggeredAlertRecord(
 )
 
 class SignalRadarViewModel(application: Application) : AndroidViewModel(application) {
+
+    private var threatRequestId = 0L
+    private var investigatorRequestId = 0L
     
     
 
@@ -2471,14 +2475,21 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             )
         }
 
+        val requestId = ++threatRequestId
         viewModelScope.launch {
-            val snapshot = captureRfSnapshot()
-            val report = geminiThreatService.analyzeRfEnvironment(snapshot)
-            _uiState.update { 
-                it.copy(
-                    threatAnalysisReport = report,
-                    isAiAnalyzingThreats = false
-                )
+            try {
+                val report = geminiThreatService.analyzeRfEnvironment(captureRfSnapshot())
+                if (requestId == threatRequestId) {
+                    _uiState.update { it.copy(threatAnalysisReport = report) }
+                }
+            } catch (e: Exception) {
+                if (requestId == threatRequestId) {
+                    _uiState.update { it.copy(threatAnalysisReport = null) }
+                }
+            } finally {
+                if (requestId == threatRequestId) {
+                    _uiState.update { it.copy(isAiAnalyzingThreats = false) }
+                }
             }
         }
     }
@@ -2496,15 +2507,18 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
 
     fun runAiInvestigator(query: String? = null) {
-        _uiState.update { it.copy(isAiAnalyzingThreats = true) }
+        val requestId = ++investigatorRequestId
+        _uiState.update { it.copy(isInvestigatorLoading = true) }
         viewModelScope.launch {
-            val pkg = captureEvidencePackage()
-            val assessment = geminiThreatService.runEvidenceInvestigator(pkg, query)
-            _uiState.update { 
-                it.copy(
-                    investigatorAssessment = assessment,
-                    isAiAnalyzingThreats = false
-                )
+            try {
+                val assessment = geminiThreatService.runEvidenceInvestigator(captureEvidencePackage(), query)
+                if (requestId == investigatorRequestId) {
+                    _uiState.update { it.copy(investigatorAssessment = assessment) }
+                }
+            } finally {
+                if (requestId == investigatorRequestId) {
+                    _uiState.update { it.copy(isInvestigatorLoading = false) }
+                }
             }
         }
     }
@@ -2539,19 +2553,16 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         viewModelScope.launch {
-            val pkg = captureEvidencePackage()
-            val answer = geminiThreatService.askTacticalCopilot(query, pkg, updatedList)
-
-            val modelMsg = TacticalCopilotMessage(
-                isUser = false, 
-                text = answer,
-                threatLevelTag = _uiState.value.threatAnalysisReport?.threatLevel
-            )
-            _uiState.update { 
-                it.copy(
-                    copilotMessages = it.copilotMessages + modelMsg,
-                    isCopilotThinking = false
+            try {
+                val answer = geminiThreatService.askTacticalCopilot(query, captureEvidencePackage(), updatedList)
+                val modelMsg = TacticalCopilotMessage(
+                    isUser = false,
+                    text = answer,
+                    threatLevelTag = _uiState.value.threatAnalysisReport?.threatLevel
                 )
+                _uiState.update { it.copy(copilotMessages = it.copilotMessages + modelMsg) }
+            } finally {
+                _uiState.update { it.copy(isCopilotThinking = false) }
             }
         }
     }
@@ -2585,22 +2596,21 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         viewModelScope.launch {
-            val snapshot = captureRfSnapshot()
-            val auditResult = geminiThreatService.performTargetDeepAudit(emitter, snapshot)
-            _uiState.update { state ->
-                // Also update the deep audit result within the report's flagged emitters list
-                val updatedReport = state.threatAnalysisReport?.let { rep ->
-                    val updatedEmitters = rep.flaggedEmitters.map { em ->
-                        if (em.id == emitter.id) em.copy(deepAuditResult = auditResult) else em
+            try {
+                val auditResult = geminiThreatService.performTargetDeepAudit(emitter, captureRfSnapshot())
+                _uiState.update { state ->
+                    val updatedReport = state.threatAnalysisReport?.let { rep ->
+                        val updatedEmitters = rep.flaggedEmitters.map { em ->
+                            if (em.id == emitter.id) em.copy(deepAuditResult = auditResult) else em
+                        }
+                        rep.copy(flaggedEmitters = updatedEmitters)
                     }
-                    rep.copy(flaggedEmitters = updatedEmitters)
+                    state.copy(selectedDeepAuditTarget = auditResult, threatAnalysisReport = updatedReport ?: state.threatAnalysisReport)
                 }
-
-                state.copy(
-                    selectedDeepAuditTarget = auditResult,
-                    threatAnalysisReport = updatedReport ?: state.threatAnalysisReport,
-                    isDeepAuditingEmitterId = null
-                )
+            } finally {
+                _uiState.update { state ->
+                    if (state.isDeepAuditingEmitterId == emitter.id) state.copy(isDeepAuditingEmitterId = null) else state
+                }
             }
         }
     }
@@ -2671,12 +2681,17 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         viewModelScope.launch {
-            val pinpointResult = geminiThreatService.performAi3dPinpoint(blip, suite, heading)
-            _uiState.update { state ->
-                state.copy(
-                    activePinpointResult = pinpointResult,
-                    isPinpointingActive = true
-                )
+            var completed = false
+            try {
+                val pinpointResult = geminiThreatService.performAi3dPinpoint(blip, suite, heading)
+                completed = true
+                _uiState.update { state ->
+                    state.copy(activePinpointResult = pinpointResult, isPinpointingActive = true)
+                }
+            } finally {
+                _uiState.update { state ->
+                    if (!completed && state.activePinpointResult?.targetId == blip.id) state.copy(isPinpointingActive = false) else state
+                }
             }
         }
     }

@@ -42,13 +42,13 @@ class TargetAuditViewModel : ViewModel() {
                     rssiDbm = currentResult.rttOrRssiDb,
                     distanceMeters = currentResult.distanceMeters.toFloat(),
                     threatCategory = ThreatCategory.UNKNOWN_ANOMALOUS_NODE,
-                    threatScore = if (currentResult.quality == SignalQuality.HIGH) 35 else 70,
-                    riskSummary = "Active target captured during high-frequency physical range detection.",
-                    recommendedAction = "Verify link layer vulnerability vectors immediately."
+                    threatScore = 0,
+                    riskSummary = "Measured ranging target; threat significance unknown.",
+                    recommendedAction = "Collect additional measurements before drawing conclusions."
                 )
 
                 val snapshot = RfEnvironmentSnapshot(
-                    totalBlipsCount = 1,
+                    totalBlipsCount = 0,
                     activeBlips = emptyList(),
                     nearestBlip = null,
                     isRfJammingDetected = false,
@@ -57,9 +57,10 @@ class TargetAuditViewModel : ViewModel() {
                     isUltrasonicAlertActive = false,
                     ultrasonicFreqHz = 0,
                     ultrasonicDb = 0f,
-                    magneticFluxMicroTesla = 48f,
+                    magneticFluxMicroTesla = 0f,
                     compassHeading = 0f,
-                    breachCount = 0
+                    breachCount = 0,
+                    environmentDataAvailable = false
                 )
 
                 val result = aiGateway.performTargetDeepAudit(emitter, snapshot)

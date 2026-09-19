@@ -113,7 +113,8 @@ data class RfEnvironmentSnapshot(
     val ultrasonicDb: Float,
     val magneticFluxMicroTesla: Float,
     val compassHeading: Float,
-    val breachCount: Int
+    val breachCount: Int,
+    val environmentDataAvailable: Boolean = true
 )
 
 enum class RadarBoostLevel(

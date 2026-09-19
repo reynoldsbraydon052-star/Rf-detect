@@ -5,6 +5,7 @@ data class AiInvestigatorAssessment(
     val confidence: Int = 0,
     val facts: List<String> = emptyList(),
     val unknowns: List<String> = emptyList(),
+    val limitations: List<String> = emptyList(),
     val recommendedMeasurements: List<String> = emptyList(),
     val evidenceReferences: List<String> = emptyList(),
     val alternativeExplanations: List<String> = emptyList()
@@ -30,5 +31,6 @@ data class AiEvidencePackage(
     val provenance: DataProvenance,
     val isLive: Boolean,
     val isSimulation: Boolean,
-    val isReplay: Boolean
+    val isReplay: Boolean,
+    val environmentDataAvailable: Boolean = true
 )

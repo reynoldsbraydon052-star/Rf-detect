@@ -180,7 +180,7 @@ class AiEngineRouter(
             }
             AiInferenceMode.AUTO_HYBRID -> {
                 if (localEngine.isAvailable()) {
-                    val localResult = localEngine.generateAnalysis(prompt, structuredSchema)
+                    val localResult = localEngine.generateAnalysis(prompt, structuredSchema, maxOutputTokens)
                     if (localResult.isSuccess) {
                         localResult
                     } else {
