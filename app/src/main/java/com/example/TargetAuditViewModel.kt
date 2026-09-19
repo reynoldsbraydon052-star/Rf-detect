@@ -26,29 +26,40 @@ class TargetAuditViewModel : ViewModel() {
     }
 
     fun initiateDeepAudit(aiGateway: TacticalAiGateway) {
-        val currentResult = _rangingResult.value ?: return
-        
+        val currentResult = _rangingResult.value
+        if (currentResult == null) {
+            _errorMessage.value = "No measured target is selected. Select a detected device before auditing."
+            return
+        }
+
         _isAnalyzing.value = true
         _errorMessage.value = null
         _auditResult.value = null
 
         viewModelScope.launch {
             try {
+                val signalType = when (currentResult.method) {
+                    RangingMethod.BLE_CHANNEL_SOUNDING -> "BLE_CS"
+                    RangingMethod.BLE_RSSI_ESTIMATE -> "BLE_RSSI"
+                }
+                val targetName = "Measured ranging target"
                 val emitter = FlaggedThreatEmitter(
                     id = currentResult.targetMac,
-                    name = "Tracked Ranging Target",
+                    name = targetName,
                     macAddress = currentResult.targetMac,
-                    signalType = if (currentResult.method == RangingMethod.BLE_CHANNEL_SOUNDING) "BLE_CS" else "BLE_RSSI",
+                    signalType = signalType,
                     rssiDbm = currentResult.rttOrRssiDb,
                     distanceMeters = currentResult.distanceMeters.toFloat(),
                     threatCategory = ThreatCategory.UNKNOWN_ANOMALOUS_NODE,
                     threatScore = 0,
-                    riskSummary = "Measured ranging target; threat significance unknown.",
-                    recommendedAction = "Collect additional measurements before drawing conclusions."
+                    riskSummary = "A measured radio target requires additional evidence before risk can be classified.",
+                    recommendedAction = "Collect repeated measurements and inspect the device locally."
                 )
 
+                // Do not send an empty/unknown environment to the audit. The selected
+                // ranging target is a real measured observation and must be included.
                 val snapshot = RfEnvironmentSnapshot(
-                    totalBlipsCount = 0,
+                    totalBlipsCount = 1,
                     activeBlips = emptyList(),
                     nearestBlip = null,
                     isRfJammingDetected = false,
@@ -60,13 +71,12 @@ class TargetAuditViewModel : ViewModel() {
                     magneticFluxMicroTesla = 0f,
                     compassHeading = 0f,
                     breachCount = 0,
-                    environmentDataAvailable = false
+                    environmentDataAvailable = true
                 )
 
-                val result = aiGateway.performTargetDeepAudit(emitter, snapshot)
-                _auditResult.value = result
+                _auditResult.value = aiGateway.performTargetDeepAudit(emitter, snapshot)
             } catch (e: Exception) {
-                _errorMessage.value = e.message ?: "Connection fault with multi-model AI Gateway."
+                _errorMessage.value = e.message ?: "The measured target audit could not be completed."
             } finally {
                 _isAnalyzing.value = false
             }
