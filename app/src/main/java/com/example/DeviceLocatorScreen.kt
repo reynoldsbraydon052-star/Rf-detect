@@ -80,10 +80,34 @@ fun DeviceLocatorScreen(
         }
     }
 
+    val bearingScanState by (viewModel?.bearingScanState?.collectAsState(ScanState.IDLE) ?: remember { mutableStateOf(ScanState.IDLE) })
+    val bearingSweepResult by (viewModel?.bearingSweepResult?.collectAsState(null) ?: remember { mutableStateOf(null) })
+    val bearingAccumulatedRotation by (viewModel?.bearingAccumulatedRotation?.collectAsState(0f) ?: remember { mutableStateOf(0f) })
+
+    val relativeBearingOffset = remember(bearingScanState, uiState.headingDegrees, bearingSweepResult) {
+        if (bearingScanState == ScanState.LOCKED) {
+            viewModel?.getRelativeTargetOffset(uiState.headingDegrees)
+        } else {
+            null
+        }
+    }
+
+    LaunchedEffect(uiState.headingDegrees, targetBlip, bearingScanState) {
+        if (bearingScanState == ScanState.CALIBRATING_ROTATION && targetBlip != null) {
+            viewModel?.feedBearingSample(
+                currentAzimuth = uiState.headingDegrees,
+                incomingMac = targetBlip.id,
+                smoothedRssi = effectiveRssi.toDouble()
+            )
+        }
+    }
+
     // Directional indicator tracking (simulated angular deviation)
     var relativeTargetAngle by remember { mutableStateOf(45f) } // relative to user's face-heading
-    LaunchedEffect(targetBlip, uiState.headingDegrees) {
-        if (targetBlip != null) {
+    LaunchedEffect(targetBlip, uiState.headingDegrees, relativeBearingOffset) {
+        if (relativeBearingOffset != null) {
+            relativeTargetAngle = (relativeBearingOffset + 360f) % 360f
+        } else if (targetBlip != null) {
             // Target angle relative to the phone's heading
             val diff = (targetBlip.targetAngleOffset - uiState.headingDegrees + 360f) % 360f
             relativeTargetAngle = diff
@@ -104,7 +128,7 @@ fun DeviceLocatorScreen(
 
     // Real-Time Audio Sonar Ticker
     var isAudioLocatorEnabled by remember { mutableStateOf(false) }
-    LaunchedEffect(isAudioLocatorEnabled, effectiveRssi) {
+    LaunchedEffect(isAudioLocatorEnabled, effectiveRssi, bearingScanState, relativeBearingOffset) {
         if (isAudioLocatorEnabled) {
             val toneGen = try {
                 ToneGenerator(AudioManager.STREAM_NOTIFICATION, 75)
@@ -114,11 +138,14 @@ fun DeviceLocatorScreen(
             if (toneGen != null) {
                 try {
                     while (isAudioLocatorEnabled) {
-                        // Stronger signal (e.g. -45 dBm) = shorter interval between ticks (e.g. 150ms)
-                        // Weaker signal (e.g. -95 dBm) = longer interval between ticks (e.g. 1300ms)
-                        val clampedRssi = effectiveRssi.coerceIn(-95, -45)
-                        val ratio = (clampedRssi + 95) / 50f // 0.0 to 1.0
-                        val delayMs = (1300 - (ratio * 1150)).toLong().coerceIn(100L, 1400L)
+                        val isLockedAligned = bearingScanState == ScanState.LOCKED && relativeBearingOffset != null && abs(relativeBearingOffset) <= 12f
+                        val delayMs = if (isLockedAligned) {
+                            75L // Geiger fast ticks!
+                        } else {
+                            val clampedRssi = effectiveRssi.coerceIn(-95, -45)
+                            val ratio = (clampedRssi + 95) / 50f // 0.0 to 1.0
+                            (1300 - (ratio * 1150)).toLong().coerceIn(100L, 1400L)
+                        }
 
                         toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 40)
                         delay(delayMs)
@@ -135,12 +162,17 @@ fun DeviceLocatorScreen(
     // Real-Time Haptic Pulse Loop
     var isHapticLocatorEnabled by remember { mutableStateOf(false) }
     val hapticFeedback = LocalHapticFeedback.current
-    LaunchedEffect(isHapticLocatorEnabled, effectiveRssi) {
+    LaunchedEffect(isHapticLocatorEnabled, effectiveRssi, bearingScanState, relativeBearingOffset) {
         if (isHapticLocatorEnabled) {
             while (isHapticLocatorEnabled) {
-                val clampedRssi = effectiveRssi.coerceIn(-95, -45)
-                val ratio = (clampedRssi + 95) / 50f
-                val delayMs = (1300 - (ratio * 1150)).toLong().coerceIn(100L, 1400L)
+                val isLockedAligned = bearingScanState == ScanState.LOCKED && relativeBearingOffset != null && abs(relativeBearingOffset) <= 12f
+                val delayMs = if (isLockedAligned) {
+                    75L // Rapid haptic pings
+                } else {
+                    val clampedRssi = effectiveRssi.coerceIn(-95, -45)
+                    val ratio = (clampedRssi + 95) / 50f
+                    (1300 - (ratio * 1150)).toLong().coerceIn(100L, 1400L)
+                }
 
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                 delay(delayMs)
@@ -378,41 +410,176 @@ fun DeviceLocatorScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Direction Alignment Banner
-                        val isAligned = relativeTargetAngle in 340f..360f || relativeTargetAngle in 0f..20f
-                        val alignmentColor = if (isAligned) Color(0xFF00FF66) else Color.Red
+                        // Calculate lock and alignments
+                        val isAligned = if (bearingScanState == ScanState.LOCKED && relativeBearingOffset != null) {
+                            abs(relativeBearingOffset) <= 12f
+                        } else {
+                            relativeTargetAngle in 340f..360f || relativeTargetAngle in 0f..20f
+                        }
 
+                        val alignmentColor = if (isAligned) Color(0xFF00FF66) else {
+                            if (bearingScanState == ScanState.CALIBRATING_ROTATION) Color(0xFFFFFF00) else Color.Red
+                        }
+
+                        // Calibration & Scanner UI Panel
                         AnimatedVisibility(
                             visible = true,
                             enter = fadeIn() + expandVertically(),
                             exit = fadeOut() + shrinkVertically()
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(alignmentColor.copy(alpha = 0.15f))
-                                    .border(1.dp, alignmentColor.copy(alpha = 0.4f))
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isAligned) Icons.Default.CheckCircle else Icons.Default.Navigation,
-                                        contentDescription = null,
-                                        tint = alignmentColor,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = if (isAligned) "ALIGNMENT LOCK: EMITTER DIRECTLY AHEAD" else "ORIENTATION DRIFT: ROTATE TO ALIGN",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 11.sp,
-                                        color = alignmentColor
-                                    )
+                                when (bearingScanState) {
+                                    ScanState.IDLE, ScanState.FAILED_INSUFFICIENT_DATA -> {
+                                        if (bearingScanState == ScanState.FAILED_INSUFFICIENT_DATA) {
+                                            Text(
+                                                text = "CALIBRATION FAILED: INSUFFICIENT DATA",
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.sp,
+                                                color = Color.Red,
+                                                modifier = Modifier.padding(bottom = 4.dp)
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                targetBlip?.let {
+                                                    viewModel?.startBearingCalibration(it.id, uiState.headingDegrees)
+                                                }
+                                            },
+                                            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.6f)),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Refresh,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF00FF66),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = "CALIBRATE BEARING (360°)",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF00FF66)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    ScanState.CALIBRATING_ROTATION -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFFFFFF00).copy(alpha = 0.15f))
+                                                .border(1.dp, Color(0xFFFFFF00).copy(alpha = 0.4f))
+                                                .padding(12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "HOLD DEVICE CLOSE TO CHEST & ROTATE 360° SLOWLY",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Black,
+                                                    fontSize = 10.sp,
+                                                    color = Color(0xFFFFFF00),
+                                                    textAlign = TextAlign.Center
+                                                )
+                                                val progress = (bearingAccumulatedRotation / 340f).coerceIn(0f, 1f)
+                                                LinearProgressIndicator(
+                                                    progress = progress,
+                                                    color = Color(0xFFFFFF00),
+                                                    trackColor = Color(0xFFFFFF00).copy(alpha = 0.2f),
+                                                    modifier = Modifier.fillMaxWidth().height(4.dp)
+                                                )
+                                                Text(
+                                                    text = "CALIBRATING ROTATION: ${(progress * 100).toInt()}%",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 9.sp,
+                                                    color = Color.LightGray
+                                                )
+                                                TextButton(onClick = { viewModel?.resetBearingCalibration() }) {
+                                                    Text(
+                                                        text = "CANCEL",
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontSize = 10.sp,
+                                                        color = Color.Red
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    ScanState.LOCKED -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(alignmentColor.copy(alpha = 0.15f))
+                                                .border(1.dp, alignmentColor.copy(alpha = 0.4f))
+                                                .padding(vertical = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isAligned) Icons.Default.CheckCircle else Icons.Default.Navigation,
+                                                    contentDescription = null,
+                                                    tint = alignmentColor,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = if (isAligned) {
+                                                        "ALIGNMENT LOCKED: TARGET LOCK"
+                                                    } else {
+                                                        val directionText = if ((relativeBearingOffset ?: 0f) > 0f) "STEER RIGHT →" else "STEER LEFT ←"
+                                                        "LOCK ACTIVE: $directionText"
+                                                    },
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontWeight = FontWeight.Black,
+                                                    fontSize = 11.sp,
+                                                    color = alignmentColor
+                                                )
+                                            }
+                                        }
+
+                                        // Confidence & Delta indicators plus Re-calibrate action
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            val scorePct = ((bearingSweepResult?.confidenceScore ?: 0f) * 100).toInt()
+                                            val sigDelta = String.format("%.1f", bearingSweepResult?.signalDelta ?: 0.0)
+                                            Text(
+                                                text = "CONFIDENCE: $scorePct% (Δ $sigDelta dBm)",
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
+                                            )
+                                            TextButton(
+                                                onClick = { viewModel?.resetBearingCalibration() },
+                                                contentPadding = PaddingValues(0.dp)
+                                            ) {
+                                                Text(
+                                                    text = "RE-CALIBRATE",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp,
+                                                    color = Color(0xFF00FF66)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

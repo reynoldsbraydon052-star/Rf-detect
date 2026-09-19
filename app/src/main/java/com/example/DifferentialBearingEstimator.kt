@@ -32,6 +32,9 @@ class DifferentialBearingEstimator(
     private val _sweepResult = MutableStateFlow<BearingSweepResult?>(null)
     val sweepResult: StateFlow<BearingSweepResult?> = _sweepResult.asStateFlow()
 
+    private val _accumulatedRotation = MutableStateFlow(0f)
+    val accumulatedRotation: StateFlow<Float> = _accumulatedRotation.asStateFlow()
+
     private var targetMacAddress: String? = null
     private var startingAzimuth: Float = 0f
     private var accumulatedRotationDegrees: Float = 0f
@@ -42,6 +45,7 @@ class DifferentialBearingEstimator(
         startingAzimuth = initialAzimuth
         lastObservedAzimuth = initialAzimuth
         accumulatedRotationDegrees = 0f
+        _accumulatedRotation.value = 0f
         
         for (bin in angularBins) {
             bin.clear()
@@ -57,6 +61,7 @@ class DifferentialBearingEstimator(
 
         val angleDiff = shortestAngleDifference(lastObservedAzimuth, currentAzimuth)
         accumulatedRotationDegrees += abs(angleDiff)
+        _accumulatedRotation.value = accumulatedRotationDegrees
         lastObservedAzimuth = currentAzimuth
 
         val binIndex = ((currentAzimuth % 360) / binSizeDegrees).toInt().coerceIn(0, totalBins - 1)
@@ -128,6 +133,7 @@ class DifferentialBearingEstimator(
         _sweepResult.value = null
         for (bin in angularBins) bin.clear()
         accumulatedRotationDegrees = 0f
+        _accumulatedRotation.value = 0f
     }
 
     private fun shortestAngleDifference(from: Float, to: Float): Float {

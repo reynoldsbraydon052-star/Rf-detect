@@ -301,6 +301,8 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .testTag("signal_radar_root"),
         bottomBar = {
             BottomRadarNavBar(
@@ -370,18 +372,7 @@ fun SignalRadarApp(viewModel: SignalRadarViewModel = viewModel()) {
                 .let { if (isImmersive) it else it.padding(padding) }
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .let {
-                        if (isImmersive) {
-                            it
-                        } else {
-                            it.padding(
-                                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                                bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                            )
-                        }
-                    }
+                modifier = Modifier.fillMaxSize()
             ) {
                 // Top Tactical Header Badge
                 if (!isImmersive) {

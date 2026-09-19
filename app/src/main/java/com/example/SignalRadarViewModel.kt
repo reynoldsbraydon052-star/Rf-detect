@@ -401,7 +401,41 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private var hardwareSensorSuiteManager: HardwareSensorSuiteManager? = null
 
     private val kalmanFilters = mutableMapOf<String, KalmanFilter>()
+    private val telemetryCoordinator = TacticalTelemetryCoordinator()
+
+    val activeThreats: StateFlow<List<DetectedThreatEvent>> = telemetryCoordinator.activeThreats
+    val trackedEmitters: StateFlow<List<TargetTelemetry>> = telemetryCoordinator.trackedEmitters
+
+    val bearingScanState: StateFlow<ScanState> = telemetryCoordinator.bearingScanState
+    val bearingSweepResult: StateFlow<BearingSweepResult?> = telemetryCoordinator.bearingSweepResult
+    val bearingAccumulatedRotation: StateFlow<Float> = telemetryCoordinator.bearingAccumulatedRotation
+
+    fun startBearingCalibration(targetMac: String, currentAzimuth: Float) {
+        telemetryCoordinator.bearingEstimator.startCalibration(targetMac, currentAzimuth)
+    }
+
+    fun resetBearingCalibration() {
+        telemetryCoordinator.bearingEstimator.reset()
+    }
+
+    fun getRelativeTargetOffset(currentAzimuth: Float): Float? {
+        return telemetryCoordinator.bearingEstimator.calculateRelativeOffset(currentAzimuth)
+    }
+
+    fun feedBearingSample(currentAzimuth: Float, incomingMac: String, smoothedRssi: Double) {
+        telemetryCoordinator.bearingEstimator.onSensorSample(currentAzimuth, incomingMac, smoothedRssi)
+    }
+
+    fun auditWifiAccessPoint(bssid: String, ssid: String, capabilities: String, freqMhz: Int, rssi: Int) {
+        telemetryCoordinator.ingestWifiObservation(bssid, ssid, capabilities, freqMhz, rssi)
+    }
+
+    fun processPedometerStep(currentHeadingDegrees: Float) {
+        telemetryCoordinator.recordPedometerStep(currentHeadingDegrees)
+    }
+
     private val blipMap = java.util.concurrent.ConcurrentHashMap<String, RadarBlip>()
+    private val observationHistory = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CopyOnWriteArrayList<Long>>()
     private var cachedFingerprints = mapOf<String, SignalFingerprint>()
     private var cachedBaselineStats: BaselineStats = BaselineStats()
     private var lastBlipUiUpdateMs = 0L
@@ -430,6 +464,14 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     val uiState: StateFlow<SignalRadarUiState> = _uiState.asStateFlow()
 
     init {
+        // Compose Frame Throttling & Ingestion Rate Limiting
+        viewModelScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                delay(180L)
+                val currentBlips = synchronized(blipMap) { blipMap.values.toList() }
+                _uiState.update { it.copy(activeBlips = currentBlips) }
+            }
+        }
 
         viewModelScope.launch {
             geminiThreatService.geminiStatus.collect { status ->
@@ -829,6 +871,24 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
             return
         }
 
+        // 1. Noise Gate Filter: Ignore raw packets weaker than -85 dBm (always keep selected target visible)
+        val noiseGateCutoff = -85
+        if (rawBlip.rssi < noiseGateCutoff && rawBlip.id != _uiState.value.selectedTargetDeviceId) {
+            return
+        }
+
+        // 2. Observation Gate: A device must be seen at least 3 distinct times within 10 seconds before being elevated
+        // (Bypass this gate for selected target or already saved DB devices)
+        val isSavedOrSelected = rawBlip.id == _uiState.value.selectedTargetDeviceId || rawBlip.id.startsWith("ble_db_")
+        if (!isSavedOrSelected) {
+            val now = System.currentTimeMillis()
+            val obsTimestamps = observationHistory.getOrPut(rawBlip.id) { java.util.concurrent.CopyOnWriteArrayList() }
+            obsTimestamps.removeAll { now - it > 10000L }
+            obsTimestamps.add(now)
+            if (obsTimestamps.size < 3) {
+                return // Drop transient noise / MAC probes
+            }
+        }
 
         val anomaly = anomalyEngine.evaluateAnomaly(rawBlip, cachedFingerprints, _uiState.value.baselineSummary)
         val blipWithAnomaly = rawBlip.copy(anomalyResult = anomaly)
@@ -883,7 +943,6 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                         fingerprintId = fpResult.fingerprint.id,
                         fingerprintConfidence = fpResult.confidence
                     )
-                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
                 }
             }
 
@@ -916,7 +975,6 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                             ouiVendor = localVendor,
                             isHighRiskVendor = isHighRisk
                         )
-                        _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
                     }
                 }
             } else {
@@ -933,7 +991,6 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                                         ouiVendor = ouiData.vendorName,
                                         isHighRiskVendor = ouiData.isHighRisk
                                     )
-                                    _uiState.update { it.copy(activeBlips = blipMap.values.toList()) }
                                 }
                             }
                         }

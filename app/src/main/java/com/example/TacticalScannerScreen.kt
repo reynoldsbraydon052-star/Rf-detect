@@ -76,6 +76,11 @@ fun TacticalScannerScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showMaskedAddresses by remember { mutableStateOf(true) }
 
+    // Stable Pinned Device List State variables
+    var isListFrozen by remember { mutableStateOf(false) }
+    var frozenPinnedList by remember { mutableStateOf<List<RadarBlip>>(emptyList()) }
+    var deviceIdOrder by remember { mutableStateOf<List<String>>(emptyList()) }
+
     // Alarm state transition tracker to prevent screen flashing/spamming
     var previousAlarmState by remember { mutableStateOf(uiState.currentAlarmState) }
     var lastAlertBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -117,6 +122,32 @@ fun TacticalScannerScreen(
                 it.id.contains(searchQuery, ignoreCase = true)
             }
         }
+    }
+
+    // Maintain a stable device ordering (append new discoveries to bottom, keep existing at same index)
+    val stableOrderedIds = remember(searchedBlips) {
+        val currentIds = searchedBlips.map { it.id }.toSet()
+        val existing = deviceIdOrder.filter { it in currentIds }
+        val brandNew = searchedBlips.map { it.id }.filter { it !in existing.toSet() }
+        existing + brandNew
+    }
+
+    LaunchedEffect(stableOrderedIds) {
+        deviceIdOrder = stableOrderedIds
+    }
+
+    val stableBlipsList = remember(deviceIdOrder, searchedBlips) {
+        deviceIdOrder.mapNotNull { id -> searchedBlips.find { it.id == id } }
+    }
+
+    // Explicit manual sorting trigger function
+    val triggerExplicitSort: () -> Unit = {
+        val sorted = searchedBlips.sortedWith(
+            compareByDescending<RadarBlip> { it.id == uiState.selectedTargetDeviceId }
+                .thenBy { (it.distance * 10f).toInt() / 5 }
+                .thenByDescending { it.rssi }
+        )
+        deviceIdOrder = sorted.map { it.id }
     }
 
     // Find the currently locked target if any
@@ -183,90 +214,146 @@ fun TacticalScannerScreen(
                 border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f)),
                 shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "RF DETECT",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.5.sp
-                            ),
-                            color = Color(0xFF00FF66)
-                        )
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "RF DETECT",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 1.5.sp
+                                ),
+                                color = Color(0xFF00FF66)
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(if (uiState.isBleScannerServiceActive) Color(0xFF00FF66) else Color.Red)
+                                )
+                                Text(
+                                    text = if (uiState.isBleScannerServiceActive) "SCANNING ACTIVE • %.1f Hz".format(1.2f) else "SCANNER OFFLINE",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+
+                        // Compact state indicator & alarm light
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (uiState.isBleScannerServiceActive) Color(0xFF00FF66) else Color.Red)
-                            )
-                            Text(
-                                text = if (uiState.isBleScannerServiceActive) "SCANNING ACTIVE • %.1f Hz".format(1.2f) else "SCANNER OFFLINE",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = Color.Gray
-                            )
+                            val alarmColor = when (uiState.currentAlarmState) {
+                                AlarmState.TRIGGERED -> Color(0xFFFF3366)
+                                AlarmState.APPROACHING -> Color(0xFFFF9900)
+                                AlarmState.COOLDOWN -> Color(0xFF00E5FF)
+                                else -> Color(0xFF00FF66).copy(alpha = 0.5f)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = alarmColor.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, alarmColor)
+                            ) {
+                                Text(
+                                    text = uiState.currentAlarmState.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black
+                                    ),
+                                    color = alarmColor,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+
+                            // Gemini Threat analyzer status badge
+                            val geminiColor = if (uiState.isAiAnalyzingThreats) Color(0xFFD066FF) else Color(0xFF00E5FF)
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = geminiColor.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, geminiColor.copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = if (uiState.isAiAnalyzingThreats) "AI ANALYSIS..." else "AI READY",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = geminiColor,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Compact state indicator & alarm light
+                    HorizontalDivider(color = Color(0xFF00FF66).copy(alpha = 0.15f))
+
+                    // Integrated Sub-Navigation Tabs Row
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp, horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val alarmColor = when (uiState.currentAlarmState) {
-                            AlarmState.TRIGGERED -> Color(0xFFFF3366)
-                            AlarmState.APPROACHING -> Color(0xFFFF9900)
-                            AlarmState.COOLDOWN -> Color(0xFF00E5FF)
-                            else -> Color(0xFF00FF66).copy(alpha = 0.5f)
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = alarmColor.copy(alpha = 0.15f),
-                            border = BorderStroke(1.dp, alarmColor)
-                        ) {
-                            Text(
-                                text = uiState.currentAlarmState.name,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Black
-                                ),
-                                color = alarmColor,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
-                        }
+                        ScannerTab.entries.forEach { tab ->
+                            val isSelected = activeTab == tab
+                            val (icon, label) = when (tab) {
+                                ScannerTab.SCAN -> Icons.Default.Radar to "SCAN"
+                                ScannerTab.TRACK -> Icons.Default.MyLocation to "TRACK"
+                                ScannerTab.LOCALIZE -> Icons.Default.GridOn to "LOCALIZE"
+                                ScannerTab.AR -> Icons.Default.QrCodeScanner to "AR"
+                            }
 
-                        // Gemini Threat analyzer status badge
-                        val geminiColor = if (uiState.isAiAnalyzingThreats) Color(0xFFD066FF) else Color(0xFF00E5FF)
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = geminiColor.copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, geminiColor.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = if (uiState.isAiAnalyzingThreats) "AI ANALYSIS..." else "AI READY",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = geminiColor,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
+                            Surface(
+                                onClick = { activeTab = tab },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.15f) else Color.Transparent,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("scanner_bottom_tab_${tab.name.lowercase()}")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = label,
+                                        tint = if (isSelected) Color(0xFF00FF66) else Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 8.sp,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = if (isSelected) Color(0xFF00FF66) else Color.Gray
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -435,8 +522,9 @@ fun TacticalScannerScreen(
             // ==================================================
             Box(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .weight(1.3f)
+                    .aspectRatio(1f)
                     .padding(horizontal = 12.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color(0xFF020703))
@@ -644,60 +732,7 @@ fun TacticalScannerScreen(
                     }
                 }
 
-                // ==================================================
-                // 5. RADAR ZOOM CONTROLS (Layered gracefully over corner)
-                // ==================================================
-                if (activeTab != ScannerTab.AR) {
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        Text(
-                            text = "RADAR RANGE",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 8.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = Color.LightGray
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf(5f, 15f, 30f, 60f).forEach { rangeMeters ->
-                                val isSelected = kotlin.math.abs(uiState.currentRadarRangeMeters - rangeMeters) < 0.5f
-                                Surface(
-                                    modifier = Modifier
-                                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                        .clickable { onSetMapRange(rangeMeters) }
-                                        .testTag("tactical_range_chip_${rangeMeters.toInt()}m"),
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isSelected) Color(0xFF00FF66) else Color(0xFF06150C),
-                                    border = BorderStroke(1.dp, if (isSelected) Color.White else Color(0xFF00FF66).copy(alpha = 0.35f))
-                                ) {
-                                    Box(
-                                        contentAlignment = Alignment.Center,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                                    ) {
-                                        Text(
-                                            text = "${rangeMeters.toInt()}m",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Black
-                                            ),
-                                            color = if (isSelected) Color.Black else Color(0xFF00FF66)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+
             }
 
             // ==================================================
@@ -866,17 +901,82 @@ fun TacticalScannerScreen(
                                 .fillMaxSize()
                                 .padding(8.dp)
                         ) {
-                            Text(
-                                text = "DISCOVERED RF SIGNALS (%d)".format(searchedBlips.size),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 8.sp,
-                                    letterSpacing = 1.sp
-                                ),
-                                color = Color(0xFF00FF66).copy(alpha = 0.7f),
-                                modifier = Modifier.padding(bottom = 6.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "DISCOVERED RF SIGNALS (%d)".format(searchedBlips.size),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 8.sp,
+                                        letterSpacing = 1.sp
+                                    ),
+                                    color = Color(0xFF00FF66).copy(alpha = 0.7f)
+                                )
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // SORT BUTTON
+                                    Surface(
+                                        modifier = Modifier
+                                            .clickable { triggerExplicitSort() },
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFF0C1B11),
+                                        border = BorderStroke(0.5.dp, Color(0xFF00FF66).copy(alpha = 0.6f))
+                                    ) {
+                                        Text(
+                                            text = "SORT",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = Color(0xFF00FF66),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+
+                                    // FREEZE / PAUSE BUTTON
+                                    val freezeLabel = if (isListFrozen) "UNFREEZE" else "FREEZE"
+                                    val freezeBg = if (isListFrozen) Color(0xFFFF3366).copy(alpha = 0.2f) else Color(0xFF0C1B11)
+                                    val freezeBorder = if (isListFrozen) Color(0xFFFF3366) else Color(0xFF00FF66).copy(alpha = 0.6f)
+                                    val freezeColor = if (isListFrozen) Color(0xFFFF3366) else Color(0xFF00FF66)
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .clickable {
+                                                if (!isListFrozen) {
+                                                    // Partition and snapshot current pinned list
+                                                    val pinned = stableBlipsList.filter { it.id == uiState.selectedTargetDeviceId }
+                                                    val remaining = stableBlipsList.filter { it.id != uiState.selectedTargetDeviceId }
+                                                    frozenPinnedList = pinned + remaining
+                                                }
+                                                isListFrozen = !isListFrozen
+                                            },
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = freezeBg,
+                                        border = BorderStroke(0.5.dp, freezeBorder)
+                                    ) {
+                                        Text(
+                                            text = freezeLabel,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = freezeColor,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
 
                             if (searchedBlips.isEmpty()) {
                                 Box(
@@ -892,12 +992,14 @@ fun TacticalScannerScreen(
                             } else {
                                 val listState = rememberLazyListState()
 
-                                // Partition list to pin locked target on top
-                                val pinnedDevicesList = remember(searchedBlips, uiState.selectedTargetDeviceId) {
-                                    val pinned = searchedBlips.filter { it.id == uiState.selectedTargetDeviceId }
-                                    val remaining = searchedBlips.filter { it.id != uiState.selectedTargetDeviceId }
+                                // Partition list to pin locked target on top (using stable list)
+                                val pinnedDevicesList = remember(stableBlipsList, uiState.selectedTargetDeviceId) {
+                                    val pinned = stableBlipsList.filter { it.id == uiState.selectedTargetDeviceId }
+                                    val remaining = stableBlipsList.filter { it.id != uiState.selectedTargetDeviceId }
                                     pinned + remaining
                                 }
+
+                                val displayedList = if (isListFrozen) frozenPinnedList else pinnedDevicesList
 
                                 LazyColumn(
                                     state = listState,
@@ -907,7 +1009,7 @@ fun TacticalScannerScreen(
                                         .testTag("tactical_scanner_device_list"),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    items(pinnedDevicesList, key = { "${it.type}_${it.id}" }) { blip ->
+                                    items(displayedList, key = { "${it.type}_${it.id}" }) { blip ->
                                         var isExpanded by remember { mutableStateOf(false) }
                                         val isSelected = blip.id == uiState.selectedTargetDeviceId
 
@@ -1327,73 +1429,6 @@ fun TacticalScannerScreen(
             }
         }
 
-        // ==================================================
-        // 4. BOTTOM COMPACT NAVIGATION
-        // ==================================================
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
-            color = Color(0xFF060D08),
-            border = BorderStroke(1.dp, Color(0xFF00FF66).copy(alpha = 0.25f))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp, horizontal = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ScannerTab.entries.forEach { tab ->
-                    val isSelected = activeTab == tab
-                    val (icon, label) = when (tab) {
-                        ScannerTab.SCAN -> Icons.Default.Radar to "SCAN"
-                        ScannerTab.TRACK -> Icons.Default.MyLocation to "TRACK"
-                        ScannerTab.LOCALIZE -> Icons.Default.GridOn to "LOCALIZE"
-                        ScannerTab.AR -> Icons.Default.QrCodeScanner to "AR"
-                    }
 
-                    Surface(
-                        onClick = {
-                            activeTab = tab
-                            // Sync tab with original optical/view state if needed
-                            if (tab == ScannerTab.AR) {
-                                // Keep AR mode integrated
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) Color(0xFF00FF66).copy(alpha = 0.15f) else Color.Transparent,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("scanner_bottom_tab_${tab.name.lowercase()}")
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(vertical = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = label,
-                                tint = if (isSelected) Color(0xFF00FF66) else Color.Gray,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 8.sp,
-                                    letterSpacing = 0.5.sp
-                                ),
-                                color = if (isSelected) Color(0xFF00FF66) else Color.Gray
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
