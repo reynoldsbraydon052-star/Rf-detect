@@ -20,7 +20,11 @@ enum class AiInferenceMode {
 }
 
 interface AiInferenceEngine {
-    suspend fun generateAnalysis(prompt: String, structuredSchema: String?): Result<String>
+    suspend fun generateAnalysis(
+        prompt: String,
+        structuredSchema: String?,
+        maxOutputTokens: Int = 1200
+    ): Result<String>
     fun isAvailable(): Boolean
 }
 
@@ -35,7 +39,11 @@ class LlamaCppEngine(private val context: Context) : AiInferenceEngine {
     )
     val connectionState: StateFlow<GeminiConnectionState> = _connectionState.asStateFlow()
 
-    override suspend fun generateAnalysis(prompt: String, structuredSchema: String?): Result<String> {
+    override suspend fun generateAnalysis(
+        prompt: String,
+        structuredSchema: String?,
+        maxOutputTokens: Int
+    ): Result<String> {
         // TODO: This is the critical entry point where the JNI/C++ native call (e.g., from llama.cpp)
         // will load the GGUF model and stream output tokens in future phases.
         val response = simulateLocalModelInference(prompt, structuredSchema)
@@ -152,16 +160,20 @@ class AiEngineRouter(
         }
     }
 
-    override suspend fun generateAnalysis(prompt: String, structuredSchema: String?): Result<String> {
+    override suspend fun generateAnalysis(
+        prompt: String,
+        structuredSchema: String?,
+        maxOutputTokens: Int
+    ): Result<String> {
         val activeMode = settingsDataStore.aiInferenceMode.first()
         
         return when (activeMode) {
             AiInferenceMode.GEMINI_CLOUD -> {
-                geminiEngine.generateAnalysis(prompt, structuredSchema)
+                geminiEngine.generateAnalysis(prompt, structuredSchema, maxOutputTokens)
             }
             AiInferenceMode.LOCAL_GGUF -> {
                 if (localEngine.isAvailable()) {
-                    localEngine.generateAnalysis(prompt, structuredSchema)
+                    localEngine.generateAnalysis(prompt, structuredSchema, maxOutputTokens)
                 } else {
                     Result.failure(Exception("Local GGUF model files are missing or unconfigured. Please load a .gguf model in private storage."))
                 }
@@ -173,11 +185,11 @@ class AiEngineRouter(
                         localResult
                     } else {
                         // Fallback to Cloud Gemini on failure
-                        geminiEngine.generateAnalysis(prompt, structuredSchema)
+                        geminiEngine.generateAnalysis(prompt, structuredSchema, maxOutputTokens)
                     }
                 } else {
                     // Fallback to Cloud Gemini if local engine is unavailable
-                    geminiEngine.generateAnalysis(prompt, structuredSchema)
+                    geminiEngine.generateAnalysis(prompt, structuredSchema, maxOutputTokens)
                 }
             }
         }

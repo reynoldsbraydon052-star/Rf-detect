@@ -210,7 +210,7 @@ class TacticalAiGateway(
         val systemPrompt = "You are an EVIDENCE-BASED AI INVESTIGATOR. Answer the user's questions based strictly on the provided evidence package. Distinguish between FACT, INFERENCE, HYPOTHESIS, and UNKNOWN. Do not fabricate answers. Do not use hyperbolic threat language unless explicitly supported by evidence."
         val fullPrompt = "$systemPrompt\n\n${historyPromptBuilder}"
 
-        val result = aiEngine.generateAnalysis(fullPrompt, null)
+        val result = aiEngine.generateAnalysis(fullPrompt, null, maxOutputTokens = 4096)
 
         if (result.isSuccess) {
             result.getOrNull() ?: ""

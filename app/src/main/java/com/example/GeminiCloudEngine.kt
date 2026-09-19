@@ -310,7 +310,11 @@ class GeminiCloudEngine : AiInferenceEngine {
         }
     }
 
-    override suspend fun generateAnalysis(prompt: String, structuredSchema: String?): Result<String> {
+    override suspend fun generateAnalysis(
+        prompt: String,
+        structuredSchema: String?,
+        maxOutputTokens: Int
+    ): Result<String> {
         val schemaJson = structuredSchema?.let {
             try {
                 JSONObject(it)
@@ -322,7 +326,8 @@ class GeminiCloudEngine : AiInferenceEngine {
         val result = generateContent(
             prompt = prompt,
             responseSchema = schemaJson,
-            responseMimeType = if (schemaJson != null) "application/json" else null
+            responseMimeType = if (schemaJson != null) "application/json" else null,
+            maxOutputTokens = maxOutputTokens
         )
         
         return when (result) {

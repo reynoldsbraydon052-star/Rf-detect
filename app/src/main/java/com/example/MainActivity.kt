@@ -808,6 +808,8 @@ fun TacticalHeader(
     onOpenScanner: (() -> Unit)? = null,
     onOpenAiIntel: (() -> Unit)? = null
 ) {
+    val isCompact = rememberWindowSizeClass().widthSizeClass == WindowWidthSizeClass.COMPACT
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -862,7 +864,7 @@ fun TacticalHeader(
                 }
             }
 
-            Row(
+            if (!isCompact) Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1007,6 +1009,55 @@ fun TacticalHeader(
             }
         }
 
+        if (isCompact) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                onOpenAiIntel?.let { onClick ->
+                    IconButton(
+                        onClick = onClick,
+                        modifier = Modifier.size(48.dp).testTag("header_ai_intel_button")
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = "Gemini AI Intel", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                onOpenScanner?.let { onClick ->
+                    IconButton(
+                        onClick = onClick,
+                        modifier = Modifier.size(48.dp).testTag("header_open_scanner_button")
+                    ) {
+                        Icon(Icons.Default.Sensors, contentDescription = "Scanner", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                onOpenFullRadar?.let { onClick ->
+                    IconButton(
+                        onClick = onClick,
+                        modifier = Modifier.size(48.dp).testTag("header_open_full_radar_button")
+                    ) {
+                        Icon(Icons.Default.Radar, contentDescription = "Full Radar", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                onOpenDocOverlay?.let { onClick ->
+                    IconButton(
+                        onClick = onClick,
+                        modifier = Modifier.size(48.dp).testTag("header_3d_doc_overlay_button")
+                    ) {
+                        Icon(Icons.Default.Devices, contentDescription = "3D Hardware Docs Overlay", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                onOpenSettings?.let { onClick ->
+                    IconButton(
+                        onClick = onClick,
+                        modifier = Modifier.size(48.dp).testTag("header_settings_button")
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+
         // Status Stats Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1078,7 +1129,7 @@ fun QuickControlsCard(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Toggle Audio Sonar Button
@@ -1092,7 +1143,10 @@ fun QuickControlsCard(
                         1.dp,
                         if (uiState.isAudioSonarActive) MaterialTheme.colorScheme.primary else Color.Gray
                     ),
-                    modifier = Modifier.testTag("toggle_sonar_button")
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("toggle_sonar_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.VolumeUp,
@@ -1103,6 +1157,8 @@ fun QuickControlsCard(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (uiState.isAudioSonarActive) "SONAR ON" else "SONAR OFF",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -1122,7 +1178,10 @@ fun QuickControlsCard(
                         1.dp,
                         if (uiState.isPerimeterAlarmEnabled) MaterialTheme.colorScheme.error else Color.Gray
                     ),
-                    modifier = Modifier.testTag("toggle_alarm_button")
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("toggle_alarm_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Vibration,
@@ -1133,6 +1192,8 @@ fun QuickControlsCard(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (uiState.isPerimeterAlarmEnabled) "ALARM ON" else "ALARM OFF",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -1145,6 +1206,8 @@ fun QuickControlsCard(
                 IconButton(
                     onClick = onToggleScanning,
                     modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
                         .background(
                             if (uiState.isScanningActive) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
                             CircleShape
@@ -4043,6 +4106,7 @@ fun BottomRadarNavBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .testTag("bottom_radar_nav_bar"),
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 8.dp,
@@ -4068,7 +4132,9 @@ fun BottomRadarNavBar(
                     modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
