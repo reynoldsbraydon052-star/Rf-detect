@@ -103,7 +103,7 @@ dependencies {
   implementation(libs.androidx.compose.ui.tooling.preview)
   implementation(libs.androidx.core.ktx)
   implementation("androidx.appcompat:appcompat:1.6.1")
-  implementation("com.google.android.material:material:1.12.0")
+  implementation("com.google.android.material:material:1.14.0")
   implementation("androidx.cardview:cardview:1.0.0")
   implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
