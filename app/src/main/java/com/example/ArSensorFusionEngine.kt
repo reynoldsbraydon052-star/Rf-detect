@@ -451,7 +451,8 @@ object NextBestMeasurementEngine {
         if (targetPoints.isEmpty()) return null
 
         val measurementCount = targetPoints.size
-        val timestamp = System.currentTimeMillis()
+        // Use the latest measurement as the evaluation time so identical replay inputs remain deterministic.
+        val timestamp = targetPoints.maxOf { it.timestamp }
 
         // 1. Determine Path Loss Model & Environment parameters (Requirement 2)
         // Check labels for explicit environment hints: FREE_SPACE, INDOOR_TYPICAL, CUSTOM, UNKNOWN

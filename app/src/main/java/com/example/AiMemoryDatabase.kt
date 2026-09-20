@@ -40,7 +40,6 @@ abstract class AiMemoryDatabase : RoomDatabase() {
                     AiMemoryDatabase::class.java,
                     "ai_memory_database"
                 )
-                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance

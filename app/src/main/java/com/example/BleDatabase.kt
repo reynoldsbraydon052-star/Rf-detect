@@ -20,7 +20,7 @@ abstract class BleDatabase : RoomDatabase() {
                     context.applicationContext,
                     BleDatabase::class.java,
                     "ble_radar_database.db"
-                ).fallbackToDestructiveMigration().build()
+                ).build()
                 INSTANCE = instance
                 instance
             }

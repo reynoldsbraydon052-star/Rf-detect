@@ -44,10 +44,9 @@ class LlamaCppEngine(private val context: Context) : AiInferenceEngine {
         structuredSchema: String?,
         maxOutputTokens: Int
     ): Result<String> {
-        // TODO: This is the critical entry point where the JNI/C++ native call (e.g., from llama.cpp)
-        // will load the GGUF model and stream output tokens in future phases.
-        val response = simulateLocalModelInference(prompt, structuredSchema)
-        return Result.success(response)
+        return Result.failure(
+            UnsupportedOperationException("Local GGUF inference is not implemented yet")
+        )
     }
 
     override fun isAvailable(): Boolean {
@@ -57,24 +56,6 @@ class LlamaCppEngine(private val context: Context) : AiInferenceEngine {
                (extModelsDir.exists() && extModelsDir.listFiles()?.any { it.name.endsWith(".gguf") } == true)
     }
 
-    private fun simulateLocalModelInference(prompt: String, structuredSchema: String?): String {
-        if (structuredSchema == null) {
-            return "Local GGUF offline model completed tactical sweep analysis."
-        }
-        
-        return """
-        {
-          "threatLevel": "LOW_CAUTION",
-          "threatScore": 22,
-          "executiveSummary": "Local LLaMA on-device offline analysis completed.",
-          "naturalLanguageThreatAssessment": "Processed entirely on-device using a local-first GGUF model. The environment exhibits standard ambient radio traffic.",
-          "identifiedVectors": ["UNREGISTERED_BLE_BEACON"],
-          "flaggedEmitters": [],
-          "countermeasures": [],
-          "rawSigintDetails": "Processed offline using local model framework."
-        }
-        """.trimIndent()
-    }
 }
 
 class AiEngineRouter(

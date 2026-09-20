@@ -6,13 +6,10 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.math.sin
-import kotlin.random.Random
 
 data class RangingUpdate(
     val macAddress: String,
@@ -89,47 +86,12 @@ class TargetRangingEngine(
         Log.i(TAG, "Initiating Android 16 RangingManager session with target $macAddress using $method")
 
         activeJob = scope.launch(Dispatchers.Default) {
-            if (rangingManager != null) {
-                // Reflectively call startRangingSession on Android 16's RangingManager
-                try {
-                    val managerClass = Class.forName("android.ranging.RangingManager")
-                    // Real implementation would look up RangingConfig and startRangingSession with callback.
-                    // We safely check capabilities and run the dynamic engine backup to support emulator/cloud tests.
-                    Log.d(TAG, "Verifying hardware capabilities of RangingManager reflectively.")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Reflection on RangingManager failed, running high-fidelity hardware emulator: ${e.message}")
-                }
+            if (rangingManager == null) {
+                Log.w(TAG, "Hardware ranging is unavailable; no synthetic ranging data will be emitted.")
+                return@launch
             }
 
-            // High-frequency ranging simulation (5Hz refresh rate) to represent real hardware updates
-            var step = 0
-            var simulatedDistance = 12.0 + Random.nextDouble(-2.0, 2.0)
-
-            while (isActive) {
-                step++
-                val delta = sin(step * 0.05) * 0.4 + Random.nextDouble(-0.15, 0.15)
-                simulatedDistance = (simulatedDistance + delta).coerceIn(0.2, 75.0)
-
-                val signalMetric = if (method == "BLE_CS") {
-                    // RSSI or channel sounding delay
-                    -40 - (simulatedDistance * 0.6).toInt().coerceAtMost(55)
-                } else {
-                    // Wi-Fi RTT Standard Deviation or signal
-                    -45 - (simulatedDistance * 0.5).toInt().coerceAtMost(45)
-                }
-
-                _rangingEvents.emit(
-                    RangingUpdate(
-                        macAddress = macAddress,
-                        distanceMeters = simulatedDistance,
-                        rssiOrSignalMetric = signalMetric,
-                        method = method,
-                        timestampMs = System.currentTimeMillis()
-                    )
-                )
-
-                delay(200) // 5Hz sampling rate
-            }
+            Log.w(TAG, "Android ranging integration is not implemented; no ranging data will be emitted.")
         }
     }
 

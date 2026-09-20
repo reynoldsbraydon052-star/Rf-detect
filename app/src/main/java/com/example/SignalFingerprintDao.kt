@@ -11,6 +11,9 @@ interface SignalFingerprintDao {
     @Query("SELECT * FROM signal_fingerprints")
     suspend fun getAllFingerprints(): List<SignalFingerprintEntity>
 
+    @Query("SELECT * FROM signal_fingerprints WHERE id = :id LIMIT 1")
+    suspend fun getFingerprint(id: String): SignalFingerprintEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFingerprint(fingerprint: SignalFingerprintEntity)
 

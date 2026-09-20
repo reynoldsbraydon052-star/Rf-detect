@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -802,9 +803,6 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                 if (_uiState.value.isScanningActive) {
                     hardwareSpectrumManager.performAllAntennaSweep(true)
                 }
-                val telemetry = hardwareSpectrumManager.getAntennaArrayTelemetry()
-                _uiState.update { it.copy(antennaArrayTelemetry = telemetry) }
-                
                 // Adaptive sweep delay: when stationary, throttle sweep frequency to save CPU and battery
                 val isStationary = _uiState.value.sensorSuite.isStationary || !_uiState.value.sensorSuite.isMotionDetected
                 val baseDelay = _uiState.value.scanMode.delayMs
@@ -869,6 +867,12 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
     private fun headingDegreesToRad(): Float = _uiState.value.headingDegrees
 
     private var baselineAltitudeMeters = 0f
+
+    private fun hashMemoryIdentifier(identifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(identifier.toByteArray(Charsets.UTF_8))
+        return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+    }
 
     private fun processSignalIntercept(rawBlip: RadarBlip) {
         if (_uiState.value.isRealOnlyMode && rawBlip.provenance == DataProvenance.SIMULATED) {
@@ -952,12 +956,13 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
 
             // Isolated local AI RAG ingestion (safeguarded to ensure RF scanning never fails)
             try {
+                val memoryTargetId = hashMemoryIdentifier(smoothedBlip.id)
                 val input = AiMemoryInput(
-                    targetId = smoothedBlip.id,
+                    targetId = memoryTargetId,
                     deviceType = smoothedBlip.type,
                     protocol = smoothedBlip.bandLabel,
                     displayName = smoothedBlip.name,
-                    sanitizedAddress = smoothedBlip.id,
+                    sanitizedAddress = memoryTargetId,
                     rssi = smoothedBlip.rssi,
                     anomalySummary = smoothedBlip.anomalyResult?.let { it.category.name + " (Score: " + it.score + ")" },
                     measurementSummary = "Distance: " + smoothedBlip.distance + "m, angle: " + (smoothedBlip.targetAngleOffset ?: 0f)
@@ -980,6 +985,7 @@ class SignalRadarViewModel(application: Application) : AndroidViewModel(applicat
                             isHighRiskVendor = isHighRisk
                         )
                     }
+
                 }
             } else {
                 viewModelScope.launch(Dispatchers.IO) {

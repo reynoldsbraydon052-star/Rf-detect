@@ -169,7 +169,7 @@ fun AiDeepAuditModal(
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .testTag("close_ai_deep_audit_modal_button")
                     ) {
                         Icon(

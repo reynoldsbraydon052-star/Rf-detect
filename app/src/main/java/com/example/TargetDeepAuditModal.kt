@@ -172,7 +172,7 @@ fun TargetDeepAuditModal(
 
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.size(32.dp).testTag("close_audit_modal")
+                        modifier = Modifier.size(48.dp).testTag("close_audit_modal")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,

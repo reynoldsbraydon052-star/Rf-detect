@@ -126,6 +126,7 @@ class SignalProvider(private val context: Context) : SensorEventListener {
     private var audioRecord: AudioRecord? = null
     private var isRecordingAudio = false
     private val scope = CoroutineScope(Dispatchers.Default)
+    private var interceptionJob: kotlinx.coroutines.Job? = null
 
     // OUI Vendor Database Matcher
     companion object {
@@ -150,6 +151,7 @@ class SignalProvider(private val context: Context) : SensorEventListener {
     }
 
     fun startInterception() {
+        if (interceptionJob?.isActive == true) return
         // Register Uncalibrated Magnetometer
         val magSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD_UNCALIBRATED)
             ?: sensorManager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
@@ -159,8 +161,8 @@ class SignalProvider(private val context: Context) : SensorEventListener {
         startAcousticFftCapture()
 
         // Poll Cellular, Wi-Fi, and GNSS periodically
-        scope.launch {
-            while (true) {
+        interceptionJob = scope.launch {
+            while (isActive) {
                 pollSpectrumData()
                 kotlinx.coroutines.delay(1000L)
             }
@@ -168,6 +170,8 @@ class SignalProvider(private val context: Context) : SensorEventListener {
     }
 
     fun stopInterception() {
+        interceptionJob?.cancel()
+        interceptionJob = null
         sensorManager?.unregisterListener(this)
         isRecordingAudio = false
         audioRecord?.stop()
@@ -213,17 +217,6 @@ class SignalProvider(private val context: Context) : SensorEventListener {
             }
         } catch (_: Exception) {}
 
-        if (wifiList.isEmpty()) {
-            // High-fidelity fallback Wi-Fi spectrum nodes
-            wifiList.addAll(
-                listOf(
-                    WifiSpectrumMetric("00:14:22:01:8A:12", "Tactical_Recon_AP_6G", -48, 6105, "6 GHz", 160, 3.2f, true, 88, "[WPA3-SAE-CCMP]"),
-                    WifiSpectrumMetric("F8:0F:F9:8B:10:99", "Pixel_Hotspot_5G", -55, 5220, "5 GHz", 80, 5.1f, false, 74, "[WPA2-PSK-CCMP]"),
-                    WifiSpectrumMetric("68:C6:3A:44:00:1C", "Covert_Hidden_Cam_AP", -62, 2437, "2.4 GHz", 20, null, false, 60, "[WPA2-PSK-CCMP]")
-                )
-            )
-        }
-
         // 2. Cellular Interception
         val cellList = mutableListOf<CellularMetric>()
         try {
@@ -257,18 +250,8 @@ class SignalProvider(private val context: Context) : SensorEventListener {
             }
         } catch (_: Exception) {}
 
-        if (cellList.isEmpty()) {
-            cellList.add(CellularMetric("5G NR Sub-6GHz", 218, -82, -9, 634000, 3510.0f))
-            cellList.add(CellularMetric("4G LTE Advanced", 104, -91, -12, 1950, 2140.0f))
-        }
-
         // 3. GNSS Satellite Interception
-        val gnssList = listOf(
-            GnssSatelliteMetric(12, "GPS Dual L1/L5", 1575420000L, "L1", 42.5f, 135f, 62f),
-            GnssSatelliteMetric(24, "GPS Dual L1/L5", 1176450000L, "L5", 39.8f, 140f, 60f),
-            GnssSatelliteMetric(7, "GALILEO E1/E5a", 1575420000L, "E1", 41.2f, 210f, 45f),
-            GnssSatelliteMetric(19, "GLONASS L1", 1602000000L, "L1", 38.0f, 45f, 30f)
-        )
+        val gnssList = emptyList<GnssSatelliteMetric>()
 
         _spectrumSnapshot.update {
             it.copy(
@@ -283,7 +266,6 @@ class SignalProvider(private val context: Context) : SensorEventListener {
     private fun startAcousticFftCapture() {
         scope.launch(Dispatchers.IO) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                startSyntheticAcousticSimulation()
                 return@launch
             }
 
@@ -294,7 +276,6 @@ class SignalProvider(private val context: Context) : SensorEventListener {
                 AudioFormat.ENCODING_PCM_16BIT
             )
             if (minBuf <= 0 || minBuf == AudioRecord.ERROR || minBuf == AudioRecord.ERROR_BAD_VALUE) {
-                startSyntheticAcousticSimulation()
                 return@launch
             }
 
@@ -313,14 +294,12 @@ class SignalProvider(private val context: Context) : SensorEventListener {
                     .build()
                 if (record.state != AudioRecord.STATE_INITIALIZED) {
                     record.release()
-                    startSyntheticAcousticSimulation()
                     return@launch
                 }
 
                 record.startRecording()
                 if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
                     record.release()
-                    startSyntheticAcousticSimulation()
                     return@launch
                 }
 

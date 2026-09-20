@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 
 data class BleDiscoveryDevice(
     val macAddress: String,
@@ -126,8 +125,6 @@ class BleDiscoveryScanner(
             Log.w(TAG, "Continuous BLE hardware scanning unavailable: ${e.message}")
         }
 
-        // Parallel high-fidelity synthetic beacon generator (crucial for Cloud Android Emulators)
-        startSyntheticScanning()
     }
 
     fun stopScanning() {
@@ -141,40 +138,4 @@ class BleDiscoveryScanner(
         }
     }
 
-    private fun startSyntheticScanning() {
-        scope.launch(Dispatchers.Default) {
-            val syntheticBeacons = listOf(
-                Pair("CS:60:A1:88:92:01", "BT 6.0 CS Precision Anchor"),
-                Pair("CS:60:E9:12:04:F8", "BT 6.0 Channel Sounding Tag"),
-                Pair("CS:60:F4:71:D9:C3", "AirTag 2.0 CS Tracker"),
-                Pair("CS:60:13:99:A2:80", "Galaxy SmartTag CS Precision"),
-                Pair("CS:60:04:31:8B:17", "High-Precision CS Centimeter Beacon"),
-                Pair("4C:11:AE:88:92:01", "Apple AirTag Beacon"),
-                Pair("D4:F5:13:99:A2:80", "Galaxy SmartTag2"),
-                Pair("80:7A:BF:14:8B:02", "Pixel Watch 3 (UWB/BLE)"),
-                Pair("D4:F5:13:99:A2:80", "Galaxy SmartTag2")
-            )
-
-            while (isScanning) {
-                val (mac, name) = syntheticBeacons.random()
-                val isCs = mac.startsWith("CS:")
-                val rssi = if (isCs) -35 - Random.nextInt(0, 25) else -45 - Random.nextInt(0, 35)
-
-                val device = BleDiscoveryDevice(
-                    macAddress = mac,
-                    name = name,
-                    rssiDbm = rssi,
-                    txPowerDbm = -59,
-                    timestampMs = System.currentTimeMillis()
-                )
-
-                synchronized(deviceMap) {
-                    deviceMap[mac] = device
-                    _bleDevices.value = deviceMap.values.toList().sortedByDescending { it.rssiDbm }
-                }
-
-                delay(1500)
-            }
-        }
-    }
 }
